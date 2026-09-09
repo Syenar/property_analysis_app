@@ -1,0 +1,5 @@
+{
+  "id":1,"name":"Zoning Districts","type":"Feature Layer","geometryType":"esriGeometryPolygon","capabilities":"Query",
+  "fields":[{"name":"ZONE","alias":"Zoning"},{"name":"ZONE_DESC","alias":"Zoning Description"}],
+  "advancedQueryCapabilities":{"supportsPagination":true}
+}

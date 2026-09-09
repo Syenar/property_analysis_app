@@ -1,0 +1,15 @@
+{
+  "result": {
+    "addressMatches": [{
+      "matchedAddress": "4600 SILVER HILL RD, WASHINGTON, DC, 20233",
+      "coordinates": {"x": -76.9274872423, "y": 38.8460162239},
+      "addressComponents": {"zip":"20233","streetName":"SILVER HILL","state":"DC","city":"WASHINGTON"},
+      "tigerLine": {"side":"L","tigerLineId":"76355984"},
+      "geographies": {
+        "States": [{"NAME":"District of Columbia","GEOID":"11"}],
+        "Counties": [{"NAME":"District of Columbia","GEOID":"11001"}],
+        "Incorporated Places": [{"NAME":"Washington city","GEOID":"1150000","LSADC":"25"}]
+      }
+    }]
+  }
+}

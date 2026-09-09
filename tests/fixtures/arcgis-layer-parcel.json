@@ -1,0 +1,7 @@
+{
+  "id":0,"name":"Tax Parcel","type":"Feature Layer","geometryType":"esriGeometryPolygon","capabilities":"Query",
+  "fields":[
+    {"name":"PARCELNUM","alias":"Parcel Number"},{"name":"ACRES","alias":"Acres"},{"name":"ONAME","alias":"Owner"},{"name":"PADDRESS","alias":"Property Address"},{"name":"TOTVAL","alias":"Total Assessed Value"}
+  ],
+  "advancedQueryCapabilities":{"supportsPagination":true}
+}

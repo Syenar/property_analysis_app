@@ -1,0 +1,8 @@
+{
+  "displayFieldName":"PARCELNUM",
+  "spatialReference":{"wkid":4326},
+  "features":[{
+    "attributes":{"PARCELNUM":"ABC-123","ACRES":1.25,"PADDRESS":"4600 SILVER HILL RD"},
+    "geometry":{"rings":[[[-76.928,38.845],[-76.927,38.845],[-76.927,38.847],[-76.928,38.847],[-76.928,38.845]]],"spatialReference":{"wkid":4326}}
+  }]
+}

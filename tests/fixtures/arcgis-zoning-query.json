@@ -1,0 +1,7 @@
+{
+  "spatialReference":{"wkid":4326},
+  "features":[{
+    "attributes":{"ZONE":"C-2","ZONE_DESC":"Commercial"},
+    "geometry":{"rings":[[[-76.93,38.84],[-76.92,38.84],[-76.92,38.85],[-76.93,38.85],[-76.93,38.84]]],"spatialReference":{"wkid":4326}}
+  }]
+}

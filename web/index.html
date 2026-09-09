@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Source-first U.S. parcel, zoning, GIS and ordinance research." />
+  <title>Property Research</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Property Research home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M5 9.5 16 4l11 5.5v13L16 28 5 22.5v-13Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 12.2 16 9l6 3.2v7.6L16 23l-6-3.2v-7.6Z" fill="currentColor" opacity=".16"/><circle cx="16" cy="16" r="2.4" fill="currentColor"/></svg>
+      </span>
+      <span>Property Research</span>
+    </a>
+    <nav class="top-actions" aria-label="Primary">
+      <a href="/api/health" class="text-link">API status</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <div class="eyebrow">SOURCE-FIRST PROPERTY INTELLIGENCE</div>
+        <h1 id="hero-title">Research a property from its address.</h1>
+        <p>Find the parcel, inspect public GIS, intersect zoning, locate governing code sources, and preserve the evidence. No AI is required.</p>
+      </div>
+
+      <form id="research-form" class="search-shell" autocomplete="off">
+        <div class="search-row">
+          <span class="search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m21 21-4.6-4.6m2.6-5.1a7.7 7.7 0 1 1-15.4 0 7.7 7.7 0 0 1 15.4 0Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <label class="sr-only" for="address">Property address</label>
+          <input id="address" name="address" type="text" placeholder="Enter a U.S. property address" spellcheck="false" required />
+          <button class="primary-button" type="submit">Research</button>
+        </div>
+        <div class="examples" aria-label="Example searches">
+          <span>Try:</span>
+          <button type="button" data-example="200 E Colfax Ave, Denver, CO 80203">Denver, CO</button>
+          <button type="button" data-example="1700 W Washington St, Phoenix, AZ 85007">Phoenix, AZ</button>
+          <button type="button" data-example="300 SW 10th Ave, Topeka, KS 66612">Topeka, KS</button>
+        </div>
+      </form>
+
+      <div class="principles" aria-label="Product principles">
+        <div><span class="principle-icon verified"></span><strong>Official sources first</strong><small>Government GIS and code sources outrank aggregators.</small></div>
+        <div><span class="principle-icon deterministic"></span><strong>Deterministic core</strong><small>APIs, geometry and indexing work without a language model.</small></div>
+        <div><span class="principle-icon provenance"></span><strong>Provenance preserved</strong><small>Every result retains its URL, timestamp and confidence evidence.</small></div>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace hidden" aria-live="polite">
+      <aside class="research-rail" aria-label="Research progress">
+        <div class="rail-heading">Research run</div>
+        <ol id="research-stages">
+          <li data-stage="geocode"><span></span><div><strong>Address</strong><small>Geocode & jurisdiction</small></div></li>
+          <li data-stage="sources"><span></span><div><strong>Sources</strong><small>Discover public GIS</small></div></li>
+          <li data-stage="parcel"><span></span><div><strong>Parcel</strong><small>Spatial lookup</small></div></li>
+          <li data-stage="zoning"><span></span><div><strong>Zoning</strong><small>Polygon intersection</small></div></li>
+          <li data-stage="ordinance"><span></span><div><strong>Code</strong><small>Ordinance discovery</small></div></li>
+          <li data-stage="packet"><span></span><div><strong>Packet</strong><small>Evidence assembled</small></div></li>
+        </ol>
+      </aside>
+
+      <div class="results-column">
+        <div id="loading-card" class="card loading-card">
+          <div class="spinner" aria-hidden="true"></div>
+          <div>
+            <h2 id="loading-title">Starting research…</h2>
+            <p id="loading-detail">The engine is resolving the property and searching authoritative public sources.</p>
+          </div>
+        </div>
+
+        <div id="error-card" class="card error-card hidden" role="alert">
+          <div class="error-icon">!</div>
+          <div>
+            <h2>Research could not finish</h2>
+            <p id="error-message"></p>
+          </div>
+        </div>
+
+        <div id="results" class="hidden">
+          <section class="result-header">
+            <div>
+              <div class="eyebrow">PROPERTY RESEARCH PACKET</div>
+              <h2 id="matched-address"></h2>
+              <div class="result-subline"><p id="jurisdiction-line"></p><span id="packet-status" class="status-chip neutral"></span></div>
+            </div>
+            <div class="result-actions">
+              <button id="copy-markdown" class="secondary-button" type="button">Copy packet</button>
+              <button id="download-json" class="secondary-button" type="button">JSON</button>
+              <button id="download-markdown" class="primary-button compact" type="button">Markdown</button>
+            </div>
+          </section>
+
+          <section class="summary-grid" aria-label="Research summary">
+            <article class="metric-card coverage-card"><span>Research coverage</span><strong id="metric-coverage">—</strong><small id="metric-missing">Assessing required sources</small></article>
+            <article class="metric-card"><span>Parcel</span><strong id="metric-parcel">—</strong><small id="metric-parcel-source"></small></article>
+            <article class="metric-card"><span>Zoning</span><strong id="metric-zoning">—</strong><small id="metric-zoning-source"></small></article>
+            <article class="metric-card"><span>Code sources</span><strong id="metric-code">—</strong><small>Candidate official documents</small></article>
+            <article class="metric-card"><span>Warnings</span><strong id="metric-warnings">—</strong><small>Items requiring review</small></article>
+          </section>
+
+          <section class="two-column">
+            <article class="card">
+              <div class="card-heading"><div><span class="section-kicker">PROPERTY</span><h3>Parcel record</h3></div><span id="parcel-status" class="status-chip"></span></div>
+              <div id="parcel-preview" class="parcel-preview empty"><svg viewBox="0 0 420 190" preserveAspectRatio="none"><path id="parcel-shape" d=""/></svg><div class="map-crosshair"></div><span id="parcel-preview-label">No geometry yet</span></div>
+              <dl id="parcel-fields" class="data-list"></dl>
+              <a id="parcel-source-link" class="source-link hidden" target="_blank" rel="noopener noreferrer">Open parcel source <span>↗</span></a>
+            </article>
+
+            <article class="card">
+              <div class="card-heading"><div><span class="section-kicker">ZONING</span><h3>Intersecting districts</h3></div><span id="zoning-status" class="status-chip"></span></div>
+              <div id="zoning-list" class="zoning-list"></div>
+            </article>
+          </section>
+
+          <section class="card">
+            <div class="card-heading"><div><span class="section-kicker">GOVERNING CODE</span><h3>Ordinance & code sources</h3></div><span class="status-chip neutral">Source-ranked</span></div>
+            <div id="ordinance-list" class="source-list"></div>
+          </section>
+
+          <section id="code-search-card" class="card hidden">
+            <div class="card-heading"><div><span class="section-kicker">INDEXED CODE</span><h3>Search this property’s ordinance packet</h3></div><span class="status-chip neutral">Full-text</span></div>
+            <form id="code-search-form" class="code-search-form">
+              <label class="sr-only" for="code-search-input">Search indexed ordinance text</label>
+              <input id="code-search-input" type="search" placeholder="Search setbacks, parking, height, conditional use…" autocomplete="off" />
+              <button class="primary-button compact" type="submit">Search code</button>
+            </form>
+            <p class="code-search-note">Search runs against the ordinance sections stored for this research run. It does not use AI.</p>
+            <div id="code-search-results" class="code-search-results"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-heading"><div><span class="section-kicker">PROVENANCE</span><h3>Evidence trail</h3></div><span class="status-chip neutral">Auditable</span></div>
+            <div id="provenance-list" class="timeline"></div>
+          </section>
+
+          <section id="limitations-card" class="card hidden">
+            <div class="card-heading"><div><span class="section-kicker">SOURCE QUALITY</span><h3>Data limitations</h3></div><span class="status-chip warning">Source notice</span></div>
+            <div id="limitations-list" class="limitation-list"></div>
+          </section>
+
+          <section id="warnings-card" class="card hidden">
+            <div class="card-heading"><div><span class="section-kicker">REVIEW</span><h3>Warnings</h3></div><span class="status-chip warning">Review</span></div>
+            <ul id="warnings-list" class="warning-list"></ul>
+          </section>
+
+          <p class="legal-note">Public GIS is commonly reference-grade rather than survey-grade. This system assembles source material; it does not provide a legal zoning opinion.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Property Research Engine</span>
+    <span>Deterministic core · Supabase/PostGIS · Cloudflare compatible</span>
+  </footer>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[
+  {"state":"AL","address":"600 Dexter Ave, Montgomery, AL 36130"},
+  {"state":"AZ","address":"1700 W Washington St, Phoenix, AZ 85007"},
+  {"state":"AR","address":"500 Woodlane St, Little Rock, AR 72201"},
+  {"state":"CA","address":"1315 10th St, Sacramento, CA 95814"},
+  {"state":"CO","address":"200 E Colfax Ave, Denver, CO 80203"},
+  {"state":"CT","address":"210 Capitol Ave, Hartford, CT 06106"},
+  {"state":"DE","address":"411 Legislative Ave, Dover, DE 19901"},
+  {"state":"FL","address":"400 S Monroe St, Tallahassee, FL 32399"},
+  {"state":"GA","address":"206 Washington St SW, Atlanta, GA 30334"},
+  {"state":"ID","address":"700 W Jefferson St, Boise, ID 83702"},
+  {"state":"IL","address":"401 S 2nd St, Springfield, IL 62701"},
+  {"state":"IN","address":"200 W Washington St, Indianapolis, IN 46204"},
+  {"state":"IA","address":"1007 E Grand Ave, Des Moines, IA 50319"},
+  {"state":"KS","address":"300 SW 10th Ave, Topeka, KS 66612"},
+  {"state":"KY","address":"700 Capital Ave, Frankfort, KY 40601"},
+  {"state":"LA","address":"900 N 3rd St, Baton Rouge, LA 70802"},
+  {"state":"ME","address":"210 State St, Augusta, ME 04330"},
+  {"state":"MD","address":"100 State Cir, Annapolis, MD 21401"},
+  {"state":"MA","address":"24 Beacon St, Boston, MA 02133"},
+  {"state":"MI","address":"100 N Capitol Ave, Lansing, MI 48933"}
+]
