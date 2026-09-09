@@ -1,0 +1,11 @@
+name = "property-zoning-research-edge"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "../web"
+binding = "ASSETS"
+
+[vars]
+ENABLE_SUPABASE_PERSISTENCE = "0"
+# Configure secrets with `wrangler secret put` rather than committing them.
