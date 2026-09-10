@@ -1,4 +1,4 @@
-name = "property-zoning-research-edge"
+name = "property-analysis-temp-syenar"
 main = "worker.mjs"
 compatibility_date = "2026-09-01"
 
@@ -8,4 +8,4 @@ binding = "ASSETS"
 
 [vars]
 ENABLE_SUPABASE_PERSISTENCE = "0"
-# Configure secrets with `wrangler secret put` rather than committing them.
+# Temporary public test deployment. No persistence or secrets are required.
