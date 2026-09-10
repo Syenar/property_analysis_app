@@ -10,6 +10,7 @@ import { WFSAdapter } from './adapters/wfs.mjs';
 import { GenericRestAdapter } from './adapters/generic-rest.mjs';
 import { StaticGisAdapter } from './adapters/static-gis.mjs';
 import { MemoryJurisdictionRegistry } from './registry/jurisdiction-registry.mjs';
+import { BOOTSTRAP_JURISDICTIONS } from './registry/bootstrap-sources.mjs';
 import { SupabaseJurisdictionRegistry } from './registry/supabase-registry.mjs';
 import { SourcePolicy } from './policy/source-policy.mjs';
 import { RobotsPolicy } from './policy/robots.mjs';
@@ -49,7 +50,7 @@ export function createEngine(env = process.env, overrides = {}) {
     http, url: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     persistEnabled: String(env.ENABLE_SUPABASE_PERSISTENCE || '0') === '1'
   });
-  const memoryRegistry = new MemoryJurisdictionRegistry();
+  const memoryRegistry = new MemoryJurisdictionRegistry(BOOTSTRAP_JURISDICTIONS);
   const registry = overrides.registry || (store.enabled()
     ? new SupabaseJurisdictionRegistry({ store, fallback: memoryRegistry })
     : memoryRegistry);
@@ -72,6 +73,7 @@ export * from './policy/robots.mjs';
 export * from './core/hash.mjs';
 export * from './packets/research-packet.mjs';
 export * from './registry/jurisdiction-registry.mjs';
+export * from './registry/bootstrap-sources.mjs';
 export * from './registry/supabase-registry.mjs';
 export * from './storage/supabase-rest.mjs';
 export * from './core/api-input.mjs';
