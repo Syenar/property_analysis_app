@@ -1,6 +1,6 @@
 import { esriGeometryToGeoJSON } from '../adapters/arcgis.mjs';
 import { geoJSONToEsriGeometry } from '../geometry/geojson.mjs';
-import { chooseNearbyParcel, featureProps, featureGeom, layerSourceUrl } from './research-helpers.mjs';
+import { chooseNearbyParcel, featureProps, featureGeom, layerSourceUrl, prioritizeRankedLayers } from './research-helpers.mjs';
 
 export async function findParcel({ engine, address, geocode, candidates, maxCandidates, inspect, warnings, provenance }) {
   for (const candidate of candidates.slice(0, maxCandidates)) {
@@ -8,7 +8,7 @@ export async function findParcel({ engine, address, geocode, candidates, maxCand
       const inspectedResult = await inspect(candidate);
       if (!inspectedResult) continue;
       const { adapter, ...inspection } = inspectedResult;
-      const ranked = adapter.rankLayers(inspection, 'parcel');
+      const ranked = prioritizeRankedLayers(adapter.rankLayers(inspection, 'parcel'), candidate.parcelLayerIds || candidate.preferredLayerIds);
       for (const rank of ranked.slice(0, 4)) {
         if (rank.score < 28) continue;
         const result = await adapter.queryPoint(candidate.url, rank.layer.id, geocode.coordinates);

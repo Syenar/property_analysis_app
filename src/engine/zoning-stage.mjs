@@ -1,5 +1,5 @@
 import { esriGeometryToGeoJSON } from '../adapters/arcgis.mjs';
-import { layerSourceUrl } from './research-helpers.mjs';
+import { layerSourceUrl, prioritizeRankedLayers } from './research-helpers.mjs';
 
 export async function findZoning({ engine, parcel, candidates, maxCandidates, inspect, warnings, provenance }) {
   const zoning = [];
@@ -9,7 +9,7 @@ export async function findZoning({ engine, parcel, candidates, maxCandidates, in
       const inspectedResult = await inspect(candidate);
       if (!inspectedResult) continue;
       const { adapter, ...inspection } = inspectedResult;
-      const ranked = adapter.rankLayers(inspection, 'zoning');
+      const ranked = prioritizeRankedLayers(adapter.rankLayers(inspection, 'zoning'), candidate.zoningLayerIds || candidate.preferredLayerIds);
       for (const rank of ranked.slice(0, 4)) {
         if (rank.score < 35) continue;
         const queryGeometry = adapter === engine.arcgis ? parcel.esriGeometry : parcel.geometry;

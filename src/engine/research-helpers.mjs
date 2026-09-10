@@ -118,6 +118,16 @@ export function candidateExtentContains(candidate, coordinates) {
   return coordinates.longitude >= minX && coordinates.longitude <= maxX && coordinates.latitude >= minY && coordinates.latitude <= maxY;
 }
 
+export function prioritizeRankedLayers(ranked, preferredIds = []) {
+  const preferred = new Map((preferredIds || []).map((id, index) => [String(id), index]));
+  if (!preferred.size) return ranked;
+  return [...ranked].sort((a, b) => {
+    const ai = preferred.has(String(a.layer?.id)) ? preferred.get(String(a.layer.id)) : Number.MAX_SAFE_INTEGER;
+    const bi = preferred.has(String(b.layer?.id)) ? preferred.get(String(b.layer.id)) : Number.MAX_SAFE_INTEGER;
+    return (ai - bi) || (b.score - a.score);
+  });
+}
+
 export function mergeLimitations(...groups) {
   const byCode = new Map();
   for (const row of groups.flat().filter(Boolean)) {
