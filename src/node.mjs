@@ -7,7 +7,9 @@ import { extractPdfText } from './documents/pdf-node.mjs';
 import { createEngine } from './index.mjs';
 
 export function createNodeEngine(env = process.env, overrides = {}) {
-  const http = overrides.http || new HttpClient();
+  const trustedHosts = [];
+  if (env.SUPABASE_URL) { try { trustedHosts.push(new URL(env.SUPABASE_URL).hostname); } catch {} }
+  const http = overrides.http || new HttpClient({ trustedHosts });
   const policy = overrides.policy || new SourcePolicy();
   const robots = overrides.robots || new RobotsPolicy({ http });
   const documentDownloader = overrides.documentDownloader || new DocumentDownloader({ http, policy, robots, pdfExtractor: extractPdfText });

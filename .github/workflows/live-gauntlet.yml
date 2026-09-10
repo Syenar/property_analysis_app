@@ -1,0 +1,45 @@
+name: Live 20-state GIS gauntlet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/run-live-gauntlet.mjs'
+      - 'tests/fixtures/gauntlet-addresses.json'
+      - '.github/workflows/live-gauntlet.yml'
+
+permissions:
+  contents: read
+
+env:
+  BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+
+jobs:
+  live-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: property-zoning-live-gauntlet
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run live public-source gauntlet
+        run: npm run test:live
+      - name: Upload live reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-gauntlet-reports
+          path: |
+            reports/live-gauntlet.json
+            reports/live-gauntlet.md
+            reports/live-gauntlet-failures.md
+          if-no-files-found: warn
+          retention-days: 30

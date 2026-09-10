@@ -18,7 +18,7 @@ U.S. Census geocoder
 Jurisdiction source registry
       |
       +--> known healthy source? ---- yes ----> query it
-      |                                  
+      |
       no
       |
       v
@@ -31,26 +31,20 @@ Deterministic discovery
   - sanctioned generic REST configs
       |
       v
-Policy + authority + geographic validation
+Policy + authority + geographic-fit scoring
+      |
+      +--> restricted source -> link only / warning
+      v
+Parcel point-in-polygon query
       |
       v
-Adapter interface
-  - ArcGISAdapter
-  - WFSAdapter
-  - GenericRestAdapter
+Parcel geometry
       |
-      +--> parcel point query
-      |       |
-      |       v
-      |   parcel GeoJSON
-      |       |
-      |       v
-      +--> zoning geometry query/intersection
-              |
-              v
-          zoning features
-              |
-              v
+      v
+Zoning polygon intersection
+      |
+      +--> zoning identifiers
+      v
 Ordinance discovery + document retrieval/indexing
               |
               v
@@ -159,3 +153,25 @@ Owns:
 - It does not silently scrape prohibited assessor vendors.
 - It does not treat GIS polygons as surveys.
 - It does not require ChatGPT, Claude, or another LLM to complete the research packet.
+
+## v0.2 hardening
+
+### Static GIS adapter
+
+The long-tail adapter accepts direct GeoJSON/JSON downloads and optional zipped shapefile datasets. Shapefile decoding is handled by the generic `shpjs` decoder rather than jurisdiction-specific code. The adapter normalizes every dataset to the same feature interface used by ArcGIS/WFS and performs local point/polygon intersection checks.
+
+### Source lifecycle and jurisdiction guards
+
+Discovery now searches municipality, county and state parcel scopes separately. Source scoring recognizes explicit superseded/retired/archive language, distinguishes current/prior-year zoning snapshots from older year-stamped datasets, rejects obvious conflicting state-coded government hosts, and retains WGS84 ArcGIS extent filtering.
+
+### Network safety
+
+All shared outbound HTTP calls validate URL protocol/host and manually validate every redirect destination. Localhost, link-local/private literal IP ranges, metadata endpoints and credential-bearing URLs are rejected by default. A specifically configured backend hostname such as a local Supabase development host can be trusted without opening arbitrary private hosts.
+
+### Public API boundary
+
+Research and ordinance-search inputs are normalized and bounded before the engine runs. Cloudflare and the local development server emit restrictive content-security, referrer, permissions and MIME-sniffing headers.
+
+### Search cost control
+
+Conventional web discovery deliberately uses a compact set of broad queries per municipality/county/state scope rather than issuing a separate paid search for every supported GIS format. ArcGIS Portal remains an independent discovery channel.

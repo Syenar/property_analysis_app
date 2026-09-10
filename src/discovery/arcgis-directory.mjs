@@ -78,14 +78,11 @@ export class ArcGISDirectoryDiscovery {
           itemType: service.type
         };
         const authority = sourceAuthorityScore(candidate, jurisdiction);
-        out.push({ ...candidate, confidence: authority.score, confidenceReasons: authority.reasons });
+        out.push({ ...candidate, lifecycle: authority.lifecycle, confidence: authority.score, confidenceReasons: authority.reasons });
       }
 
       if (current.depth >= this.maxDepth) continue;
       for (const folder of (data.folders || []).slice(0, this.maxFolders)) {
-        // Only recurse into folders with weak or strong topical signals, plus a
-        // small number of neutral folders. This prevents a giant public server
-        // from turning one lookup into hundreds of requests.
         const relevant = purposeSignal(folder, purpose) || /public|external|planning|gis|maps/i.test(folder);
         if (!relevant && current.depth > 0) continue;
         const root = arcgisDirectoryRoot(current.url) || current.url;

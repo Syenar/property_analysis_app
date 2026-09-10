@@ -1,6 +1,6 @@
 {
   "name": "property-zoning-research-engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Deterministic U.S. property, parcel, zoning and ordinance research engine",
@@ -13,5 +13,8 @@
     "research": "node scripts/research-address.mjs",
     "dev": "node scripts/dev-server.mjs",
     "check": "node scripts/check-syntax.mjs"
+  },
+  "optionalDependencies": {
+    "shpjs": "6.2.0"
   }
 }

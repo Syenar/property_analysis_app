@@ -3,10 +3,7 @@ import { sourceAuthorityScore, sourceFreshness } from '../confidence/scoring.mjs
 const SEARCH = 'https://www.arcgis.com/sharing/rest/search';
 
 export class ArcGISPortalDiscovery {
-  constructor({ http, maxPerQuery = 40 } = {}) {
-    this.http = http;
-    this.maxPerQuery = maxPerQuery;
-  }
+  constructor({ http, maxPerQuery = 40 } = {}) { this.http = http; this.maxPerQuery = maxPerQuery; }
 
   async search(jurisdiction, purpose) {
     const aliases = (jurisdiction.candidates || []).filter((x) => x.priority >= 80).map((x) => x.name);
@@ -23,20 +20,13 @@ export class ArcGISPortalDiscovery {
       for (const item of data.results || []) {
         if (!item.url) continue;
         const candidate = {
-          platform: 'arcgis',
-          itemId: item.id,
-          title: item.title,
-          description: item.description || item.snippet || '',
-          owner: item.owner,
-          access: item.access,
-          modified: item.modified ? new Date(item.modified).toISOString() : null,
-          url: item.url,
-          itemType: item.type,
-          tags: item.tags || [],
-          extent: item.extent || null
+          platform: 'arcgis', itemId: item.id, title: item.title,
+          description: item.description || item.snippet || '', owner: item.owner,
+          access: item.access, modified: item.modified ? new Date(item.modified).toISOString() : null,
+          url: item.url, itemType: item.type, tags: item.tags || [], extent: item.extent || null
         };
         const authority = sourceAuthorityScore(candidate, jurisdiction);
-        items.push({ ...candidate, freshness: sourceFreshness(candidate.modified), confidence: authority.score, confidenceReasons: authority.reasons });
+        items.push({ ...candidate, freshness: sourceFreshness(candidate.modified), lifecycle: authority.lifecycle, confidence: authority.score, confidenceReasons: authority.reasons });
       }
     }
     const byUrl = new Map();

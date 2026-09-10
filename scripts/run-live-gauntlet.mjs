@@ -23,32 +23,36 @@ for (const [index, c] of cases.entries()) {
       zoningFound: packet.zoning.length > 0,
       zoningSources: packet.zoning.map((z) => z.sourceUrl),
       ordinanceCandidates: packet.ordinanceSources.length,
+      ordinanceFound: packet.ordinanceSources.length > 0,
+      complete: packet.assessment?.status === 'complete',
       assessment: packet.assessment,
       warnings: packet.warnings
     };
     results.push(row);
-    console.log(row.parcelFound ? (row.zoningFound ? 'PASS' : 'PARTIAL') : 'FAIL');
+    console.log(row.complete ? 'COMPLETE' : (row.geocoded ? 'PARTIAL' : 'FAIL'));
   } catch (error) {
     results.push({ ...c, elapsedMs: Date.now() - started, error: error.stack || String(error) });
     console.log('ERROR');
   }
 }
 
-const failureRows = results.filter((r) => !r.parcelFound || !r.zoningFound || r.error);
+const failureRows = results.filter((r) => !r.complete || r.error);
 const summary = {
   generatedAt: new Date().toISOString(),
   total: results.length,
   geocoded: results.filter((r) => r.geocoded).length,
   parcelFound: results.filter((r) => r.parcelFound).length,
   zoningFound: results.filter((r) => r.zoningFound).length,
+  ordinanceFound: results.filter((r) => r.ordinanceFound).length,
+  complete: results.filter((r) => r.complete).length,
   parcelFailures: results.filter((r) => !r.parcelFound).length,
   zoningFailures: results.filter((r) => r.parcelFound && !r.zoningFound).length,
   errors: results.filter((r) => r.error).length
 };
 await mkdir('reports', { recursive: true });
 await writeFile('reports/live-gauntlet.json', JSON.stringify({ summary, results }, null, 2));
-const lines = ['# Live 20-state gauntlet', '', `Generated: ${summary.generatedAt}`, '', `- Total: ${summary.total}`, `- Geocoded: ${summary.geocoded}`, `- Parcel found: ${summary.parcelFound}`, `- Zoning found: ${summary.zoningFound}`, '', '| State | Address | Parcel | Zoning | Parcel source | Notes |', '|---|---|---:|---:|---|---|'];
-for (const r of results) lines.push(`| ${r.state} | ${r.address.replace(/\|/g,'\\|')} | ${r.parcelFound ? 'yes' : 'no'} | ${r.zoningFound ? 'yes' : 'no'} | ${r.parcelSource || ''} | ${(r.error || (r.warnings || []).join('; ')).replace(/\|/g,'\\|').slice(0,500)} |`);
+const lines = ['# Live 20-state gauntlet', '', `Generated: ${summary.generatedAt}`, '', `- Total: ${summary.total}`, `- Geocoded: ${summary.geocoded}`, `- Parcel found: ${summary.parcelFound}`, `- Zoning found: ${summary.zoningFound}`, `- Ordinance source found: ${summary.ordinanceFound}`, `- Complete source packets: ${summary.complete}`, '', '| State | Address | Parcel | Zoning | Ordinance | Packet | Parcel source | Notes |', '|---|---|---:|---:|---:|---|---|---|'];
+for (const r of results) lines.push(`| ${r.state} | ${r.address.replace(/\|/g,'\\|')} | ${r.parcelFound ? 'yes' : 'no'} | ${r.zoningFound ? 'yes' : 'no'} | ${r.ordinanceFound ? 'yes' : 'no'} | ${r.complete ? 'complete' : (r.assessment?.status || 'failed')} | ${r.parcelSource || ''} | ${(r.error || (r.warnings || []).join('; ')).replace(/\|/g,'\\|').slice(0,500)} |`);
 await writeFile('reports/live-gauntlet.md', lines.join('\n'));
 const failureLines = ['# Live gauntlet failure report', '', `Generated: ${summary.generatedAt}`, '', failureRows.length ? `Failures/partials: ${failureRows.length}` : 'No parcel/zoning failures.', ''];
 for (const r of failureRows) {
@@ -56,6 +60,8 @@ for (const r of failureRows) {
   failureLines.push(`- Geocoded: ${r.geocoded ? 'yes' : 'no'}`);
   failureLines.push(`- Parcel: ${r.parcelFound ? 'found' : 'missing'}`);
   failureLines.push(`- Zoning: ${r.zoningFound ? 'found' : 'missing'}`);
+  failureLines.push(`- Ordinance source: ${r.ordinanceFound ? 'found' : 'missing'}`);
+  failureLines.push(`- Packet status: ${r.assessment?.status || 'failed'}`);
   if (r.parcelSource) failureLines.push(`- Parcel source: ${r.parcelSource}`);
   for (const w of r.warnings || []) failureLines.push(`- Warning: ${String(w)}`);
   if (r.error) failureLines.push(`- Error: ${String(r.error)}`);

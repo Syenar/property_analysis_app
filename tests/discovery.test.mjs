@@ -18,3 +18,28 @@ test('merges web-discovered government ArcGIS services with Portal results', asy
   assert.ok(result.parcelCandidates.some((c) => c.url.includes('gis.example.gov') && c.url.endsWith('/FeatureServer')));
   assert.ok(result.zoningCandidates.some((c) => c.url.endsWith('/MapServer')));
 });
+
+test('GIS web discovery searches county separately as a parcel fallback and detects static downloads', async () => {
+  const queries = [];
+  const engine = new SourceDiscoveryEngine({
+    arcgis:{ search:async () => [] },
+    webSearch:{ search:async (q) => {
+      queries.push(q);
+      if (q.includes('Kent County Delaware') && q.includes('GeoJSON')) return [{ title:'Kent County Parcels GeoJSON', url:'https://gis.kentcountyde.gov/download/parcels.geojson', description:'Official parcel GIS download', source:'test' }];
+      return [];
+    }}
+  });
+  const result = await engine.discoverGis({ municipality:'Dover', county:'Kent County', state:'Delaware' });
+  assert.ok(queries.some((q) => q.startsWith('Kent County Delaware parcel')));
+  assert.ok(result.parcelCandidates.some((c) => c.platform === 'static-geojson' && c.discoveryScope === 'county'));
+});
+
+test('broad GIS web discovery limits duplicate search-provider calls', async () => {
+  let calls = 0;
+  const engine = new SourceDiscoveryEngine({
+    arcgis:{ search:async () => [] },
+    webSearch:{ search:async () => { calls++; return []; } }
+  });
+  await engine.discoverGis({ municipality:'Example City', county:'Example County', state:'Pennsylvania' });
+  assert.ok(calls <= 8, `expected at most 8 search calls, got ${calls}`);
+});

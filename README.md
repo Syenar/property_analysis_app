@@ -16,6 +16,8 @@ The product is intentionally built as research infrastructure: find authoritativ
    - ArcGIS Hub / Open Data / Web Map item resolution
    - OGC Web Feature Service (WFS) detection
    - declaratively configured sanctioned JSON REST APIs
+   - direct GeoJSON/JSON downloads
+   - zipped shapefile downloads through optional `shpjs`
 5. Inspect GIS layers and score parcel/zoning candidates from names, geometry types, query capabilities, field schemas, source authority, and geographic extent.
 6. Spatially query the parcel at the geocoded point.
 7. Convert ArcGIS multipart polygons and holes to valid GeoJSON.
@@ -58,6 +60,8 @@ Then open `http://localhost:8787`.
 - `src/discovery` — ArcGIS Portal, ArcGIS REST directory, ArcGIS Hub item resolution, optional conventional web search
 - `src/adapters` — ArcGIS REST, OGC WFS, and generic sanctioned JSON REST adapters
 - `src/geometry` — deterministic geometry conversion/intersection helpers
+- `src/core/url-safety.mjs` — outbound URL/redirect safeguards against local/private literal targets
+- `src/core/api-input.mjs` — bounded API input normalization
 - `src/registry` — jurisdiction/source registry and source-health timestamps
 - `src/confidence` — deterministic source/layer authority scoring
 - `src/policy` — automation restrictions, source limitations, and robots policy
@@ -70,7 +74,7 @@ Then open `http://localhost:8787`.
 - `scripts/run-live-gauntlet.mjs` — 20-state live address harness and failure-report generator
 - `reports/` — source-validation and failure reports from the current research pass
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/deployment.md`](docs/deployment.md).
+See [`docs/architecture.md`](docs/architecture.md), [`docs/deployment.md`](docs/deployment.md), [`docs/search-and-coverage.md`](docs/search-and-coverage.md), and [`docs/production-checklist.md`](docs/production-checklist.md).
 
 ## Quick start: command-line research
 
@@ -132,13 +136,24 @@ npm test
 npm run check
 ```
 
-The deterministic suite covers geocoding parsing, ArcGIS service/directory/Hub discovery, WFS, declarative REST, layer scoring, geometry, source-policy restrictions, source limitations, robots rules, packet completeness, source health, Supabase persistence controls, full-text ordinance search, and the end-to-end deterministic engine flow using fixtures.
+The deterministic suite covers geocoding parsing, ArcGIS service/directory/Hub discovery, WFS, declarative REST, static GeoJSON/shapefile handling, layer scoring, geometry, source lifecycle/freshness, source-policy restrictions, source limitations, robots rules, safe outbound URLs/redirects, bounded API inputs, packet completeness, source health, Supabase persistence controls, full-text ordinance search, and end-to-end deterministic engine flows using fixtures.
 
 ## Important limitations
 
 - No single public national parcel/zoning API exists. Coverage depends on fragmented local public data.
+- Broad conventional web discovery is optional and non-AI. Configure `BRAVE_SEARCH_API_KEY` to find GIS/code sources that ArcGIS Portal does not index; verified registry entries continue to work without it.
 - A publicly reachable REST endpoint is not automatically licensed for integration. Source metadata and explicit policies can block automated use.
 - Public GIS geometry is commonly reference-grade, not survey-grade. The packet preserves those limitations instead of hiding them.
 - A successfully downloaded PDF is not counted as indexed ordinance evidence until usable text was actually extracted.
 - GIS/assessor/zoning sources can disagree or be stale. The product preserves authority, freshness clues, and warnings rather than silently choosing an answer.
 - Ordinance *interpretation* is deliberately outside the deterministic core. The output is designed for architects/planners/lawyers or optional external AI analysis later.
+
+## Security posture
+
+The shared HTTP client rejects credential-bearing URLs, localhost, link-local/private literal IP targets, and unsafe redirect destinations. API input sizes are bounded, Cloudflare/local responses use restrictive browser security headers, and Supabase service-role functions remain server-only. See [`SECURITY.md`](SECURITY.md).
+
+## GitHub automation
+
+- `CI` runs syntax validation and deterministic tests on Node 20 and 22.
+- `Live 20-state GIS gauntlet` runs the real public-source harness and uploads the generated reports as a workflow artifact. A `BRAVE_SEARCH_API_KEY` repository secret improves broad discovery but is not an AI dependency.
+- `Deploy Cloudflare` is a manual deployment workflow that uses scoped `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.

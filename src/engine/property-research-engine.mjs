@@ -2,11 +2,15 @@ import { buildResearchPacket, packetToMarkdown } from '../packets/research-packe
 import { esriGeometryToGeoJSON } from '../adapters/arcgis.mjs';
 import { geoJSONToEsriGeometry } from '../geometry/geojson.mjs';
 import { zoningIdentifiers } from '../indexing/text-index.mjs';
+import { sourceLifecycle } from '../confidence/scoring.mjs';
 
 function featureProps(f) { return f?.properties || f?.attributes || {}; }
 function featureGeom(f) { return f?.geometry || null; }
 function layerSourceUrl(candidate, inspection, layerId) {
   if (candidate?.platform === 'wfs') return `${candidate.url}#typeName=${encodeURIComponent(layerId)}`;
+  if (candidate?.platform === 'static-geojson' || candidate?.platform === 'static-shapefile') {
+    return Number(layerId) > 0 ? `${candidate.url}#layer=${encodeURIComponent(layerId)}` : candidate.url;
+  }
   return `${inspection.url}/${layerId}`;
 }
 
@@ -36,8 +40,8 @@ function mergeLimitations(...groups) {
 }
 
 export class PropertyResearchEngine {
-  constructor({ geocoder, discovery, arcgis, wfs = null, genericRest = null, registry, ordinanceDiscovery, documentDownloader, store = null, sourcePolicy }) {
-    Object.assign(this, { geocoder, discovery, arcgis, wfs, genericRest, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy });
+  constructor({ geocoder, discovery, arcgis, wfs = null, genericRest = null, staticGis = null, registry, ordinanceDiscovery, documentDownloader, store = null, sourcePolicy }) {
+    Object.assign(this, { geocoder, discovery, arcgis, wfs, genericRest, staticGis, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy });
   }
 
   async run(address, { fetchOrdinanceDocuments = true, maxGisCandidates = 8, maxOrdinanceDocuments = 3, onProgress = null } = {}) {
@@ -77,15 +81,21 @@ export class PropertyResearchEngine {
     const inspected = new Map();
     const adapterFor = (candidate) => {
       if (!candidate?.url) return null;
+      if ((candidate.platform === 'static-geojson' || candidate.platform === 'static-shapefile') && this.staticGis?.supports(candidate.url)) return this.staticGis;
       if (candidate.platform === 'wfs' && this.wfs?.supports(candidate.url)) return this.wfs;
       if (this.arcgis?.supports(candidate.url)) return this.arcgis;
       if (this.wfs?.supports(candidate.url)) return this.wfs;
+      if (this.staticGis?.supports(candidate.url)) return this.staticGis;
       if (this.genericRest?.supports(candidate.url)) return this.genericRest;
       return null;
     };
     const inspect = async (candidate) => {
       const adapter = adapterFor(candidate);
       if (!adapter) return null;
+      if (['superseded','historical'].includes(candidate.lifecycle?.status)) {
+        warnings.push(`GIS source skipped (${candidate.lifecycle.status}): ${candidate.url}`);
+        return null;
+      }
       const policy = this.sourcePolicy?.decision(candidate.url, {
         official: candidate.official,
         kind: 'gis',
@@ -110,7 +120,14 @@ export class PropertyResearchEngine {
           copyrightText: inspection?.service?.copyrightText,
           terms: inspection?.service?.termsOfUse
         });
-        if (servicePolicy && servicePolicy.action !== 'fetch') {
+        const serviceLifecycle = sourceLifecycle({
+          title: candidate.title,
+          description: `${candidate.description || ''} ${inspection?.service?.description || ''} ${inspection?.service?.documentInfo?.Title || ''} ${inspection?.service?.documentInfo?.Comments || ''}`
+        });
+        if (['superseded','historical'].includes(serviceLifecycle.status)) {
+          warnings.push(`GIS service metadata indicates ${serviceLifecycle.status} data; source skipped: ${candidate.url}`);
+          inspected.set(candidate.url, null);
+        } else if (servicePolicy && servicePolicy.action !== 'fetch') {
           warnings.push(`GIS service metadata requires review (${servicePolicy.reason}): ${candidate.url}`);
           inspected.set(candidate.url, null);
         } else {

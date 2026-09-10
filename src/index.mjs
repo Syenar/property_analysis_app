@@ -8,6 +8,7 @@ import { SourceDiscoveryEngine } from './discovery/source-discovery.mjs';
 import { ArcGISAdapter } from './adapters/arcgis.mjs';
 import { WFSAdapter } from './adapters/wfs.mjs';
 import { GenericRestAdapter } from './adapters/generic-rest.mjs';
+import { StaticGisAdapter } from './adapters/static-gis.mjs';
 import { MemoryJurisdictionRegistry } from './registry/jurisdiction-registry.mjs';
 import { SupabaseJurisdictionRegistry } from './registry/supabase-registry.mjs';
 import { SourcePolicy } from './policy/source-policy.mjs';
@@ -30,7 +31,9 @@ function parseGenericRestConfigs(env, overrides) {
 }
 
 export function createEngine(env = process.env, overrides = {}) {
-  const http = overrides.http || new HttpClient();
+  const trustedHosts = [];
+  if (env.SUPABASE_URL) { try { trustedHosts.push(new URL(env.SUPABASE_URL).hostname); } catch {} }
+  const http = overrides.http || new HttpClient({ trustedHosts });
   const geocoder = overrides.geocoder || new CensusGeocoder({ http });
   const arcgisPortal = overrides.arcgisPortal || new ArcGISPortalDiscovery({ http });
   const webSearch = overrides.webSearch || (env.BRAVE_SEARCH_API_KEY ? new BraveSearchProvider({ http, apiKey: env.BRAVE_SEARCH_API_KEY }) : new NoopSearchProvider());
@@ -40,6 +43,7 @@ export function createEngine(env = process.env, overrides = {}) {
   const arcgis = overrides.arcgis || new ArcGISAdapter({ http });
   const wfs = overrides.wfs || new WFSAdapter({ http });
   const genericRest = overrides.genericRest || new GenericRestAdapter({ http, configs: parseGenericRestConfigs(env, overrides) });
+  const staticGis = overrides.staticGis || new StaticGisAdapter({ http, shapefileDecoder: overrides.shapefileDecoder });
   const policy = overrides.policy || new SourcePolicy();
   const store = overrides.store || new SupabaseRestStore({
     http, url: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
@@ -52,7 +56,7 @@ export function createEngine(env = process.env, overrides = {}) {
   const ordinanceDiscovery = overrides.ordinanceDiscovery || new OrdinanceDiscovery({ sourceDiscovery: discovery, policy });
   const robots = overrides.robots || new RobotsPolicy({ http });
   const documentDownloader = overrides.documentDownloader || new DocumentDownloader({ http, policy, robots });
-  return new PropertyResearchEngine({ geocoder, discovery, arcgis, wfs, genericRest, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy: policy });
+  return new PropertyResearchEngine({ geocoder, discovery, arcgis, wfs, genericRest, staticGis, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy: policy });
 }
 
 export * from './adapters/arcgis.mjs';
@@ -60,6 +64,7 @@ export * from './discovery/arcgis-directory.mjs';
 export * from './discovery/arcgis-hub.mjs';
 export * from './adapters/generic-rest.mjs';
 export * from './adapters/wfs.mjs';
+export * from './adapters/static-gis.mjs';
 export * from './geometry/geojson.mjs';
 export * from './confidence/scoring.mjs';
 export * from './policy/source-policy.mjs';
@@ -69,3 +74,5 @@ export * from './packets/research-packet.mjs';
 export * from './registry/jurisdiction-registry.mjs';
 export * from './registry/supabase-registry.mjs';
 export * from './storage/supabase-rest.mjs';
+export * from './core/api-input.mjs';
+export * from './core/url-safety.mjs';

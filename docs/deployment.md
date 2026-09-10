@@ -96,3 +96,13 @@ Only configure sources whose terms/license permit the intended automated use.
 ## GitHub CI
 
 `.github/workflows/ci.yml` runs the deterministic test suite and syntax checks. A deployment workflow can be added after Cloudflare/Supabase repository secrets are configured.
+
+## GitHub Actions
+
+Three workflows are included:
+
+- `CI`: installs the lockfile and runs syntax/tests on Node 20 and Node 22.
+- `Live 20-state GIS gauntlet`: performs the real public-network research harness and uploads reports. Configure the optional `BRAVE_SEARCH_API_KEY` repository secret for broad conventional web discovery.
+- `Deploy Cloudflare`: manual production deployment using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+
+The Cloudflare API token should be scoped only to the Worker/account resources required for this project.

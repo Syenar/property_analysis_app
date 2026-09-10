@@ -1,4 +1,4 @@
-import { sourceAuthorityScore } from '../confidence/scoring.mjs';
+import { sourceAuthorityScore, sourceLifecycle } from '../confidence/scoring.mjs';
 
 function normalizeArcGisServiceUrl(input) {
   try {
@@ -14,23 +14,36 @@ function normalizeArcGisServiceUrl(input) {
   }
 }
 
+function officialHost(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host.endsWith('.gov') || host.endsWith('.us');
+  } catch { return false; }
+}
+
+function applyAuthority(base, jurisdiction) {
+  const authority = sourceAuthorityScore(base, jurisdiction);
+  return {
+    ...base,
+    lifecycle: authority.lifecycle || sourceLifecycle(base),
+    confidence: authority.score,
+    confidenceReasons: authority.reasons
+  };
+}
+
 function asWebGisCandidate(result, jurisdiction) {
   const url = normalizeArcGisServiceUrl(result.url);
   if (!url) return null;
-  let host = '';
-  try { host = new URL(url).hostname.toLowerCase(); } catch {}
-  const official = host.endsWith('.gov') || host.endsWith('.us');
-  const base = {
+  return applyAuthority({
     platform: 'arcgis',
     discoverySource: result.source || 'web-search',
+    discoveryScope: result.discoveryScope || null,
     title: result.title || url,
     description: result.description || '',
     url,
-    official,
+    official: officialHost(url),
     access: 'public'
-  };
-  const authority = sourceAuthorityScore(base, jurisdiction);
-  return { ...base, confidence: authority.score, confidenceReasons: authority.reasons };
+  }, jurisdiction);
 }
 
 function asWfsCandidate(result, jurisdiction) {
@@ -38,14 +51,42 @@ function asWfsCandidate(result, jurisdiction) {
   try { u = new URL(result.url); } catch { return null; }
   const looksWfs = /(?:^|\/)wfs(?:\/|$)/i.test(u.pathname) || /^wfs$/i.test(u.searchParams.get('service') || '') || /geoserver/i.test(u.pathname);
   if (!looksWfs) return null;
-  const host = u.hostname.toLowerCase();
-  const base = {
-    platform: 'wfs', discoverySource: result.source || 'web-search', title: result.title || result.url,
+  return applyAuthority({
+    platform: 'wfs', discoverySource: result.source || 'web-search', discoveryScope: result.discoveryScope || null,
+    title: result.title || result.url,
     description: result.description || '', url: result.url,
-    official: host.endsWith('.gov') || host.endsWith('.us'), access: 'public'
-  };
-  const authority = sourceAuthorityScore(base, jurisdiction);
-  return { ...base, confidence: authority.score, confidenceReasons: authority.reasons };
+    official: officialHost(result.url), access: 'public'
+  }, jurisdiction);
+}
+
+export function detectStaticGisFormat(input, context = '') {
+  let u;
+  try { u = new URL(input); } catch { return null; }
+  const path = decodeURIComponent(u.pathname).toLowerCase();
+  const query = u.search.toLowerCase();
+  const hay = `${path} ${query} ${context}`.toLowerCase();
+  if (/\.geojson$/.test(path) || /(?:format|f|outputformat)=geojson/.test(query) || /geojson/.test(hay) && /download|dataset|parcel|zoning|gis/.test(hay)) return 'geojson';
+  if (/\.zip$/.test(path) && /shapefile|shape.?file|parcel|zoning|gis|download|dataset/.test(hay)) return 'shapefile';
+  if (/\.shp$/.test(path)) return 'shapefile';
+  if (/\.json$/.test(path) && /parcel|zoning|cadastre|cadastral|gis|geojson/.test(hay)) return 'geojson';
+  return null;
+}
+
+function asStaticGisCandidate(result, jurisdiction) {
+  const context = `${result.title || ''} ${result.description || ''}`;
+  const format = detectStaticGisFormat(result.url, context);
+  if (!format) return null;
+  return applyAuthority({
+    platform: format === 'geojson' ? 'static-geojson' : 'static-shapefile',
+    format,
+    discoverySource: result.source || 'web-search',
+    discoveryScope: result.discoveryScope || null,
+    title: result.title || result.url,
+    description: result.description || '',
+    url: result.url,
+    official: officialHost(result.url),
+    access: 'public'
+  }, jurisdiction);
 }
 
 function dedupeAndSort(candidates) {
@@ -55,6 +96,21 @@ function dedupeAndSort(candidates) {
     if (!current || (candidate.confidence || 0) > (current.confidence || 0)) byUrl.set(candidate.url, candidate);
   }
   return [...byUrl.values()].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+function jurisdictionSearchScopes(jurisdiction, { includeCounty = true, includeState = false } = {}) {
+  const aliases = (jurisdiction.candidates || []).filter((x) => x.priority >= 80).map((x) => x.name);
+  const primary = jurisdiction.municipality || aliases[0];
+  const state = jurisdiction.state || '';
+  const scopes = [];
+  if (primary) scopes.push({ scope:'municipality', place:[primary, state].filter(Boolean).join(' ') });
+  if (includeCounty && jurisdiction.county && !String(jurisdiction.county).toLowerCase().includes(String(primary || '').toLowerCase())) {
+    scopes.push({ scope:'county', place:[jurisdiction.county, state].filter(Boolean).join(' ') });
+  }
+  if (includeState && state) scopes.push({ scope:'state', place:state });
+  if (!scopes.length) scopes.push({ scope:'jurisdiction', place:[jurisdiction.county, state].filter(Boolean).join(' ') });
+  const seen = new Set();
+  return scopes.filter((row) => row.place && !seen.has(row.place.toLowerCase()) && seen.add(row.place.toLowerCase()));
 }
 
 export class SourceDiscoveryEngine {
@@ -84,8 +140,13 @@ export class SourceDiscoveryEngine {
       ? await this.arcgisHub.resolveResults(webResults, jurisdiction)
       : [];
 
-    const webCandidates = webResults.flatMap((r) => [asWebGisCandidate(r, jurisdiction), asWfsCandidate(r, jurisdiction)]).filter(Boolean);
-    const parcelWeb = webCandidates.filter((c) => /parcel|cadastre|cadastral|tax.?lot|property/i.test(`${c.title} ${c.description} ${c.url}`));
+    const webCandidates = webResults.flatMap((r) => [
+      asWebGisCandidate(r, jurisdiction),
+      asWfsCandidate(r, jurisdiction),
+      asStaticGisCandidate(r, jurisdiction)
+    ]).filter(Boolean);
+
+    const parcelWeb = webCandidates.filter((c) => /parcel|cadastre|cadastral|tax.?lot|property|assessment/i.test(`${c.title} ${c.description} ${c.url}`));
     const zoningWeb = webCandidates.filter((c) => /zoning|zone|land.?use/i.test(`${c.title} ${c.description} ${c.url}`));
     const neutralWeb = webCandidates.filter((c) => !parcelWeb.includes(c) && !zoningWeb.includes(c));
 
@@ -96,26 +157,44 @@ export class SourceDiscoveryEngine {
   }
 
   async discoverOfficialWebSources(jurisdiction, purpose, extraQueries = []) {
-    const aliases = (jurisdiction.candidates || []).filter((x) => x.priority >= 80).map((x) => x.name);
-    const primary = jurisdiction.municipality || aliases[0];
-    const place = [primary, jurisdiction.county, jurisdiction.state].filter(Boolean).join(' ');
-    const terms = purpose === 'ordinance'
-      ? [`${place} zoning ordinance`, `${place} zoning code`, `${place} zoning amendments`]
-      : [
-          `${place} parcel GIS FeatureServer`,
-          `${place} parcel GIS MapServer`,
-          `${place} zoning GIS FeatureServer`,
-          `${place} zoning GIS MapServer`,
-          `${place} arcgis rest services parcel`,
-          `${place} arcgis rest services zoning`,
-          `${place} parcel WFS GIS`,
-          `${place} zoning WFS GIS`
+    const queryRows = [];
+    if (purpose === 'ordinance') {
+      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty: !jurisdiction.municipality })) {
+        queryRows.push(
+          { ...row, q:`${row.place} zoning ordinance` },
+          { ...row, q:`${row.place} zoning code` },
+          { ...row, q:`${row.place} zoning amendments` }
+        );
+      }
+    } else {
+      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true, includeState:true })) {
+        const place = row.place;
+        const common = [
+          `${place} parcel GIS ArcGIS REST FeatureServer MapServer`,
+          `${place} zoning GIS ArcGIS REST FeatureServer MapServer`,
+          `${place} parcel zoning GIS data download GeoJSON shapefile WFS`
         ];
+        const selected = row.scope === 'state'
+          ? [`${place} statewide parcel GIS ArcGIS`, `${place} parcel open data GeoJSON shapefile`]
+          : common;
+        selected.forEach((q) => queryRows.push({ ...row, q }));
+      }
+    }
+
+    for (const q of extraQueries) queryRows.push({ scope:'extra', place:'', q });
+
     const results = [];
-    for (const q of [...terms, ...extraQueries]) results.push(...await this.webSearch.search(q, { count: 10 }));
-    const unique = new Map(results.map((r) => [r.url, r]));
+    for (const row of queryRows) {
+      const found = await this.webSearch.search(row.q, { count: 10 });
+      for (const result of found) results.push({ ...result, discoveryScope: result.discoveryScope || row.scope, discoveryQuery: row.q });
+    }
+    const unique = new Map();
+    for (const result of results) {
+      const existing = unique.get(result.url);
+      if (!existing || (existing.discoveryScope === 'state' && result.discoveryScope !== 'state')) unique.set(result.url, result);
+    }
     return [...unique.values()];
   }
 }
 
-export { normalizeArcGisServiceUrl };
+export { normalizeArcGisServiceUrl, jurisdictionSearchScopes };
