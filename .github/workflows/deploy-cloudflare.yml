@@ -19,9 +19,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Deploy Worker and static assets
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --config cloudflare/wrangler.toml
+      - name: Deploy temporary Worker and static assets
+        shell: bash
+        run: |
+          set +e
+          npx --yes wrangler@4.130.0 deploy --temporary --config cloudflare/wrangler.toml > /tmp/wrangler.out 2>&1
+          status=$?
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('/tmp/wrangler.out').read_text(errors='replace')
+          text = re.sub(r'https://dash\.cloudflare\.com/[^\s\x1b]+', '[REDACTED_CLOUDFLARE_CLAIM_URL]', text)
+          text = re.sub(r'(?im)^.*claim(?:ing)?(?: url| link| token)?.*$', '[Cloudflare claim information redacted]', text)
+          print(text)
+          PY
+          exit "$status"
