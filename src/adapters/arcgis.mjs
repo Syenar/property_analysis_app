@@ -29,9 +29,6 @@ function esriRingsToGeoJSON(rings) {
     .map((ring, index) => ({ ring, index, area: Math.abs(ringArea(ring)), parent: null, depth: 0 }))
     .sort((a, b) => b.area - a.area);
 
-  // ArcGIS normally uses ring orientation to distinguish shells and holes, but
-  // real public datasets are inconsistent. Nesting produces correct Polygon /
-  // MultiPolygon structure even when orientation is reversed by a publisher.
   for (let i = 0; i < normalized.length; i++) {
     const child = normalized[i];
     const sample = child.ring[0];
@@ -82,6 +79,20 @@ function layerUrl(serviceUrl, layerId) {
   return `${normalizeServiceUrl(serviceUrl)}/${layerId}`;
 }
 
+async function queryJson(http, url) {
+  if (url.length < 1800 || typeof http.request !== 'function') return http.getJson(url);
+  const parsed = new URL(url);
+  const body = parsed.searchParams.toString();
+  parsed.search = '';
+  const response = await http.request(parsed.toString(), {
+    method:'POST',
+    headers:{ 'content-type':'application/x-www-form-urlencoded;charset=UTF-8', Accept:'application/json' },
+    body
+  });
+  const text = await response.text();
+  try { return JSON.parse(text); } catch { throw new Error(`Invalid ArcGIS JSON from ${parsed}`); }
+}
+
 export class ArcGISAdapter {
   constructor({ http }) { this.http = http; }
 
@@ -120,12 +131,7 @@ export class ArcGISAdapter {
     p.set('outFields', outFields);
     p.set('returnGeometry', String(returnGeometry));
     p.set('outSR', '4326');
-    try {
-      return await this.http.getJson(url.toString());
-    } catch {
-      p.set('f', 'pjson');
-      return await this.http.getJson(url.toString());
-    }
+    return this.http.getJson(url.toString());
   }
 
   async queryGeometry(serviceUrl, layerId, geometry, { geometryType = 'esriGeometryPolygon', inSR = 4326, outFields = '*', returnGeometry = true } = {}) {
@@ -140,25 +146,34 @@ export class ArcGISAdapter {
     p.set('outFields', outFields);
     p.set('returnGeometry', String(returnGeometry));
     p.set('outSR', '4326');
-    try {
-      return await this.http.getJson(url.toString());
-    } catch {
-      p.set('f', 'pjson');
-      return await this.http.getJson(url.toString());
-    }
+    return queryJson(this.http, url.toString());
   }
 
-  firstFeature(result) {
-    return result?.features?.[0] || null;
+  async queryNearby(serviceUrl, layerId, { longitude, latitude }, { meters = 40, outFields = '*', returnGeometry = true } = {}) {
+    const latitudeRadians = latitude * Math.PI / 180;
+    const dy = meters / 111320;
+    const dx = meters / Math.max(111320 * Math.cos(latitudeRadians), 1000);
+    const envelope = { xmin:longitude-dx, ymin:latitude-dy, xmax:longitude+dx, ymax:latitude+dy, spatialReference:{wkid:4326} };
+    const url = new URL(`${layerUrl(serviceUrl, layerId)}/query`);
+    const p = url.searchParams;
+    p.set('f','json');
+    p.set('where','1=1');
+    p.set('geometry',JSON.stringify(envelope));
+    p.set('geometryType','esriGeometryEnvelope');
+    p.set('inSR','4326');
+    p.set('spatialRel','esriSpatialRelIntersects');
+    p.set('outFields',outFields);
+    p.set('returnGeometry',String(returnGeometry));
+    p.set('outSR','4326');
+    const result = await queryJson(this.http, url.toString());
+    return { ...result, _nearbyMeters:meters };
   }
 
+  firstFeature(result) { return result?.features?.[0] || null; }
   featureGeometry(feature) {
     if (!feature) return null;
     if (feature.type === 'Feature') return feature.geometry;
     return feature.geometry || null;
   }
-
-  featureProperties(feature) {
-    return feature?.properties || feature?.attributes || {};
-  }
+  featureProperties(feature) { return feature?.properties || feature?.attributes || {}; }
 }
