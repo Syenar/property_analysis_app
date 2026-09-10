@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'scripts/run-live-gauntlet.mjs'
       - 'tests/fixtures/gauntlet-addresses.json'
       - '.github/workflows/live-gauntlet.yml'
