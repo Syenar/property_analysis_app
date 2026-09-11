@@ -10,7 +10,7 @@ jobs:
       - name: Verify Phoenix Capitol plans on live Worker
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           url='https://property-analysis-temp-syenar.band-cheek.workers.dev'
           healthy=0
           for attempt in $(seq 1 20); do
@@ -18,10 +18,17 @@ jobs:
             if [ "$code" = 200 ] && grep -q '"ok"' /tmp/health; then healthy=1; break; fi
             sleep 2
           done
-          test "$healthy" -eq 1
-          code=$(timeout 120s curl -sS --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1700 W WASHINGTON ST, PHOENIX, AZ, 85007","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":4,"maxBlueprintDocuments":4}' "$url/api/research/stream")
-          echo "HTTP $code"
-          cat /tmp/research.ndjson
+          test "$healthy" -eq 1 || { echo 'Health failed'; exit 1; }
+          : > /tmp/research.ndjson
+          set +e
+          code=$(timeout 150s curl -sS --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1700 W WASHINGTON ST, PHOENIX, AZ, 85007","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":4,"maxBlueprintDocuments":4}' "$url/api/research/stream")
+          curl_status=$?
+          set -e
+          echo "CURL_STATUS $curl_status HTTP ${code:-none}"
+          echo '--- live Phoenix stream ---'
+          cat /tmp/research.ndjson || true
+          echo '--- end stream ---'
+          test "$curl_status" -eq 0
           test "$code" = 200
           grep -q '"type":"result"' /tmp/research.ndjson
           grep -q '"stage":"plans"' /tmp/research.ndjson
