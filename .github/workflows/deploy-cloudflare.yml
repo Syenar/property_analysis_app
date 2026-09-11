@@ -4,7 +4,7 @@ on:
     branches: [temp-cloudflare-preview]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -16,6 +16,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Apply preview updates
+        shell: bash
         run: |
           node scripts/patch-preview-ui.mjs
           node scripts/patch-preview-app-view.mjs
@@ -26,7 +27,20 @@ jobs:
           echo '9f93d27a65d83c0257d19e4a00aa03146fe311f77f32cdf741a8399629f0f9e1  /tmp/blueprints.mjs' | sha256sum -c -
           python3 -c 'from pathlib import Path; p=Path("/tmp/blueprints.mjs"); s=p.read_text(); s=s.replace("  `  async queryAttachments(serviceUrl, layerId, objectId, { signal } = {}) {", "  \"  async queryAttachments(serviceUrl, layerId, objectId, { signal } = {}) {", 1).replace("  firstFeature(result) {\\n`);", "  firstFeature(result) {\\n\");", 1).replace("`  firstFeature(result) {\\n`,", "`  firstFeature(result) { return result?.features?.[0] || null; }\\n`,", 1).replace("  firstFeature(result) {\\n\");", "  firstFeature(result) { return result?.features?.[0] || null; }\\n\");", 1); p.write_text(s)'
           node --check /tmp/blueprints.mjs
-          node /tmp/blueprints.mjs
+          set +e
+          node /tmp/blueprints.mjs > blueprint-patch-error.log 2>&1
+          patch_status=$?
+          set -e
+          if [ "$patch_status" -ne 0 ]; then
+            cat blueprint-patch-error.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add blueprint-patch-error.log
+            git commit -m "Record blueprint preview patch failure" || true
+            git push origin HEAD:temp-cloudflare-preview
+            exit "$patch_status"
+          fi
+          rm -f blueprint-patch-error.log
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
