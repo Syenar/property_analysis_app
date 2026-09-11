@@ -34,13 +34,30 @@ jobs:
           print(text)
           PY
           if [ "$status" -ne 0 ]; then exit "$status"; fi
+          set -e
           url=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler.out | tail -n 1)
           test -n "$url"
           echo "Public preview: $url"
-          curl --fail --silent --show-error "$url/api/health" | tee /tmp/health.json
-          grep -q '"ok"' /tmp/health.json
+
+          healthy=0
+          for attempt in $(seq 1 20); do
+            code=$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$url/api/health" || true)
+            if [ "$code" = "200" ] && grep -q '"ok"' /tmp/health.json; then
+              healthy=1
+              break
+            fi
+            echo "Waiting for public Worker routing (attempt $attempt, HTTP $code)..."
+            sleep 2
+          done
+          if [ "$healthy" -ne 1 ]; then
+            echo 'Temporary Worker never became healthy.' >&2
+            cat /tmp/health.json >&2 || true
+            exit 1
+          fi
+          cat /tmp/health.json
+
           set +e
-          timeout 30s curl --silent --show-error --no-buffer \
+          timeout 25s curl --silent --show-error --no-buffer \
             -H 'content-type: application/json' \
             --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"maxGisCandidates":1,"maxOrdinanceDocuments":1}' \
             "$url/api/research/stream" > /tmp/research.ndjson
@@ -51,8 +68,12 @@ jobs:
             echo 'Cloudflare illegal-invocation regression detected.' >&2
             exit 1
           fi
-          if [ ! -s /tmp/research.ndjson ]; then
-            echo "Research stream produced no response (curl status $research_status)." >&2
+          if grep -Fqi 'error code: 1042' /tmp/research.ndjson; then
+            echo 'Cloudflare Worker-to-Worker routing regression detected.' >&2
+            exit 1
+          fi
+          if ! grep -q '^{' /tmp/research.ndjson; then
+            echo "Research stream did not produce NDJSON (curl status $research_status)." >&2
             exit 1
           fi
           echo 'Live Cloudflare research smoke check passed.'
