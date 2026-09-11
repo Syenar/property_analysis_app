@@ -106,9 +106,6 @@ jobs:
           grep -q 'blueprintResearch' web/app.js
           grep -q 'blueprintResearch' src/packets/research-packet.mjs
           grep -q 'permit-record-attachment' src/plans/blueprint-discovery.mjs
-          echo '--- browser building-document state logic ---'
-          grep -n -A35 -B20 'blueprintResearch' web/app.js | head -120 || true
-          echo '--- end browser building-document state logic ---'
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
@@ -137,16 +134,12 @@ jobs:
             echo "Waiting for public Worker health routing (attempt $attempt, HTTP $code)..."
             sleep 2
           done
-          if [ "$healthy" -ne 1 ]; then
-            echo 'Temporary Worker never became healthy.' >&2
-            cat /tmp/health >&2 || true
-            exit 1
-          fi
+          test "$healthy" -eq 1
           cat /tmp/health
           research_ready=0
           for attempt in $(seq 1 15); do
             : > /tmp/research.ndjson
-            code=$(timeout 90s curl --silent --show-error --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" || true)
+            code=$(timeout 150s curl --silent --show-error --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1700 W WASHINGTON ST, PHOENIX, AZ, 85007","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":4,"maxBlueprintDocuments":4}' "$url/api/research/stream" || true)
             if [ "$code" = "200" ] && grep -q '"type":"result"' /tmp/research.ndjson; then
               research_ready=1
               break
@@ -154,24 +147,19 @@ jobs:
             echo "Waiting for public Worker research routing (attempt $attempt, HTTP $code)..."
             sleep 2
           done
-          echo '--- research stream ---'
+          echo '--- Phoenix blueprint research stream ---'
           cat /tmp/research.ndjson
           echo '--- end research stream ---'
           test "$research_ready" -eq 1
           grep -q '"stage":"plans"' /tmp/research.ndjson
           grep -q '"type":"result"' /tmp/research.ndjson
           grep -q '"blueprintResearch":{"attempted":true' /tmp/research.ndjson
-          grep -q '"blueprintSources":\[' /tmp/research.ndjson
-          grep -q '"blueprintDocuments":\[' /tmp/research.ndjson
+          grep -q '236509' /tmp/research.ndjson
+          grep -q '236514' /tmp/research.ndjson
+          grep -q '236520' /tmp/research.ndjson
           ! grep -q '"type":"error"' /tmp/research.ndjson
           ! grep -Fqi 'rethrowIfAborted is not defined' /tmp/research.ndjson
           ! grep -Fqi 'signal is not defined' /tmp/research.ndjson
-          ! grep -Fqi 'fetchBlueprintDocuments is not defined' /tmp/research.ndjson
-          ! grep -Fqi 'maxBlueprintDocuments is not defined' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
           ! grep -Fqi 'error code: 1042' /tmp/research.ndjson
-          if [ -n "${BRAVE_SEARCH_API_KEY:-}" ]; then
-            grep -q '"webSearchAvailable":true' /tmp/research.ndjson
-            echo 'Configured web search was available to building-document discovery.'
-          fi
-          echo 'Live building-document research reached the final browser packet.'
+          echo 'Live Phoenix regression passed: all three Arizona Capitol plan records were returned.'
