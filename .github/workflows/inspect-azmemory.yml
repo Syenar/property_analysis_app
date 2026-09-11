@@ -8,36 +8,26 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect search form and candidate parameters
+      - name: Probe allowed archive discovery routes
         shell: bash
         run: |
-          set -euo pipefail
-          base='https://azmemory.azlibrary.gov/nodes/search'
-          curl -fsSL "$base" -o /tmp/search.html
-          echo '--- forms ---'
-          grep -Eoi '<form[^>]*>|<input[^>]*>|<select[^>]*>|<button[^>]*>' /tmp/search.html | head -120
-          echo '--- scripts mentioning search ---'
-          grep -Eoi '.{0,100}(search|keyword|query|term).{0,180}' /tmp/search.html | head -120 || true
-          echo '--- candidate GETs ---'
-          python3 - <<'PY'
-          import urllib.parse, urllib.request, re
-          base='https://azmemory.azlibrary.gov/nodes/search'
-          candidates=[
-            {'keywords':'Arizona State Capitol'}, {'keyword':'Arizona State Capitol'},
-            {'search':'Arizona State Capitol'}, {'query':'Arizona State Capitol'}, {'q':'Arizona State Capitol'},
-            {'searchterm':'Arizona State Capitol'}, {'searchterms':'Arizona State Capitol'},
-            {'search_text':'Arizona State Capitol'}, {'searchtext':'Arizona State Capitol'},
-          ]
-          for params in candidates:
-            url=base+'?'+urllib.parse.urlencode(params)
-            try:
-              with urllib.request.urlopen(url, timeout=20) as resp:
-                body=resp.read().decode('utf-8','replace')
-                status=resp.status
-                final=resp.geturl()
-            except Exception as e:
-              print(params, 'ERR', repr(e)); continue
-            text=re.sub(r'<[^>]+>',' ',body)
-            hits=sum(x.lower() in text.lower() for x in ['Arizona State Capitol','02-0299','02-0300','Architectural drawings'])
-            print(params, status, final, 'len',len(body),'hits',hits, 'resultword', 'results found' in text.lower())
-          PY
+          set -u
+          ua='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36'
+          for url in \
+            'https://azmemory.azlibrary.gov/robots.txt' \
+            'https://azmemory.azlibrary.gov/sitemap.xml' \
+            'https://azmemory.azlibrary.gov/nodes/search' \
+            'https://azmemory.azlibrary.gov/nodes/view/236509' \
+            'https://azmemory.azlibrary.gov/nodes/view/236514'; do
+            echo "=== $url ==="
+            code=$(curl -A "$ua" -L -sS -o /tmp/body -w '%{http_code}' "$url" || true)
+            echo "HTTP $code bytes $(wc -c </tmp/body 2>/dev/null || echo 0)"
+            head -c 800 /tmp/body 2>/dev/null | tr '\n' ' '; echo
+          done
+          echo '--- search form with browser UA ---'
+          code=$(curl -A "$ua" -L -sS -o /tmp/search.html -w '%{http_code}' 'https://azmemory.azlibrary.gov/nodes/search' || true)
+          echo "HTTP $code"
+          if [ "$code" = 200 ]; then
+            grep -Eoi '<form[^>]*>|<input[^>]*>|<select[^>]*>|<button[^>]*>' /tmp/search.html | head -160 || true
+            grep -Eoi '.{0,120}(search|keyword|query|term).{0,220}' /tmp/search.html | head -160 || true
+          fi
