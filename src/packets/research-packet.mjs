@@ -41,6 +41,25 @@ export function assessPacket(data) {
   };
 }
 
+function publicDocumentShape(d) {
+  return {
+    url: d.url,
+    title: d.title || null,
+    fetched: Boolean(d.fetched),
+    retrievedAt: d.retrievedAt || null,
+    contentType: d.contentType || null,
+    bytes: d.bytes || null,
+    sha256: d.sha256 || null,
+    sourceModifiedAt: d.sourceModifiedAt || null,
+    keywordHits: d.keywordHits || [],
+    policy: d.policy || null,
+    sections: d.sections || [],
+    planType: d.planType || null,
+    confidence: Number.isFinite(d.confidence) ? d.confidence : null,
+    sourceCandidate: d.sourceCandidate || null
+  };
+}
+
 export function buildResearchPacket(data) {
   const assessment = assessPacket(data);
   const sourceLimitations = [];
@@ -51,6 +70,19 @@ export function buildResearchPacket(data) {
   for (const d of data.documents || []) {
     if (d.policy?.limitations?.length) sourceLimitations.push({ kind: 'ordinance-document', url: d.url, limitations: d.policy.limitations });
   }
+  for (const d of data.blueprintDocuments || []) {
+    if (d.policy?.limitations?.length) sourceLimitations.push({ kind: 'building-document', url: d.url, limitations: d.policy.limitations });
+  }
+
+  const blueprintResearch = data.blueprintResearch && typeof data.blueprintResearch === 'object'
+    ? {
+        attempted: Boolean(data.blueprintResearch.attempted),
+        webSearchAvailable: data.blueprintResearch.webSearchAvailable == null ? null : Boolean(data.blueprintResearch.webSearchAvailable),
+        directDocumentCount: Number(data.blueprintResearch.directDocumentCount || 0),
+        arcgisAttachmentCount: Number(data.blueprintResearch.arcgisAttachmentCount || 0)
+      }
+    : { attempted:false, webSearchAvailable:null, directDocumentCount:0, arcgisAttachmentCount:0 };
+
   return {
     schemaVersion: '0.3',
     generatedAt: new Date().toISOString(),
@@ -63,12 +95,11 @@ export function buildResearchPacket(data) {
     zoningIdentifiers: data.zoningIdentifiers || [],
     gisSources: data.gisSources || [],
     ordinanceSources: data.ordinanceSources || [],
+    blueprintResearch,
+    blueprintSources: data.blueprintSources || data.blueprintResearch?.sources || [],
+    blueprintDocuments: (data.blueprintDocuments || []).map(publicDocumentShape),
     sourceLimitations,
-    documents: (data.documents || []).map((d) => ({
-      url: d.url, title: d.title || null, fetched: d.fetched, retrievedAt: d.retrievedAt || null, contentType: d.contentType || null,
-      bytes: d.bytes || null, sha256: d.sha256 || null, sourceModifiedAt: d.sourceModifiedAt || null, keywordHits: d.keywordHits || [], policy: d.policy || null,
-      sections: d.sections || []
-    })),
+    documents: (data.documents || []).map(publicDocumentShape),
     warnings: data.warnings || [],
     provenance: data.provenance || []
   };
@@ -116,6 +147,22 @@ export function packetToMarkdown(packet) {
   lines.push('', '## Ordinance / code sources', '');
   if (!packet.ordinanceSources.length) lines.push('No ordinance source discovered by configured deterministic search providers.');
   packet.ordinanceSources.slice(0, 15).forEach((s) => lines.push(`- ${s.title || s.url} — ${s.url} — confidence ${s.confidence ?? 'n/a'} — automation: ${s.automation?.action || 'unknown'}`));
+
+  lines.push('', '## Blueprints / building plans', '');
+  if (!packet.blueprintResearch?.attempted) {
+    lines.push('Building-document discovery was not run.');
+  } else if (!(packet.blueprintSources || []).length) {
+    lines.push(packet.blueprintResearch.webSearchAvailable === false
+      ? 'Public ArcGIS permit/planning records and attachments were searched; no address-matched building-plan candidate was found. Conventional web search was not configured for this run.'
+      : 'Public permit/planning sources were searched; no address-matched building-plan candidate was found.');
+  } else {
+    packet.blueprintSources.slice(0, 20).forEach((s) => lines.push(`- ${s.title || s.url} — ${s.url} — type ${s.planType || 'plan-candidate'} — confidence ${s.confidence ?? 'n/a'} — automation: ${s.automation?.action || 'unknown'}`));
+  }
+  if ((packet.blueprintDocuments || []).length) {
+    lines.push('', '### Retrieved building documents', '');
+    packet.blueprintDocuments.slice(0, 20).forEach((d) => lines.push(`- ${d.title || d.url} — fetched ${d.fetched ? 'yes' : 'no'} — ${d.url}`));
+  }
+
   lines.push('', '## Source limitations', '');
   if (!packet.sourceLimitations?.length) lines.push('- No source-specific limitations were detected in fetched metadata.');
   for (const source of packet.sourceLimitations || []) {
