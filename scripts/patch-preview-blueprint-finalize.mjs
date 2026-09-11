@@ -41,4 +41,5 @@ const providerParts = await Promise.all([
 await writeFile('src/plans/archive-provider-registry.mjs', providerParts.join(''));
 
 await import('./patch-preview-archive.mjs');
+await import('./patch-preview-archive-normalize.mjs');
 console.log('Deterministic archive/catalog discovery and reusable provider adapters wired into preview build.');
