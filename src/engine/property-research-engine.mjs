@@ -11,7 +11,7 @@ export class PropertyResearchEngine {
     Object.assign(this, { geocoder, discovery, arcgis, wfs, genericRest, staticGis, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy });
   }
 
-  async run(address, { fetchOrdinanceDocuments = true, maxGisCandidates = 8, maxOrdinanceDocuments = 3, onProgress = null } = {}) {
+  async run(address, { fetchOrdinanceDocuments = true, maxGisCandidates = 8, maxOrdinanceDocuments = 3, onProgress = null, signal = null } = {}) {
     const warnings = [];
     const provenance = [];
     const emit = async (stage, status = 'active', detail = null, extra = {}) => {
@@ -83,7 +83,7 @@ export class PropertyResearchEngine {
       const byUrl = new Map([...ordinanceSources, ...discovered].filter((x) => x?.url).map((x) => [x.url, x]));
       ordinanceSources = [...byUrl.values()].sort((a,b) => (b.confidence || 0) - (a.confidence || 0));
     } catch (error) {
-      rethrowIfAborted(error);
+      rethrowIfAborted(error, signal);
       warnings.push(`Ordinance discovery failed: ${error.message}`);
     }
     await emit('ordinance', ordinanceSources.length ? 'done' : 'failed', ordinanceSources.length
@@ -99,7 +99,7 @@ export class PropertyResearchEngine {
           documents.push(document);
           if (document.fetched) provenance.push({ kind:'ordinance-document', url:candidate.url, retrievedAt:document.retrievedAt });
         } catch (error) {
-          rethrowIfAborted(error);
+          rethrowIfAborted(error, signal);
           warnings.push(`Document fetch failed: ${candidate.url}: ${error.message}`);
         }
       }
