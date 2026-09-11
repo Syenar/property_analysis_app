@@ -1,0 +1,140 @@
+name: Pull Arizona Capitol Plans
+on:
+  push:
+    branches: [temp-cloudflare-preview]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download public archival architectural drawings
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time, urllib.request, urllib.parse, html as htmlmod
+          from pathlib import Path
+
+          out = Path('arizona-capitol-plans')
+          out.mkdir()
+          ua = {'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/152 Safari/537.36'}
+          phrase = "Architect's plan for the Arizona State Capitol in Phoenix"
+          found = []
+
+          def get(url, timeout=30):
+              req = urllib.request.Request(url, headers=ua)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return r.read(), r.headers.get('content-type',''), r.geturl()
+
+          def normalize_asset(raw, page_url):
+              raw = htmlmod.unescape(raw).replace('\\/','/')
+              if raw.startswith('//'): raw = 'https:' + raw
+              elif raw.startswith('/'): raw = urllib.parse.urljoin(page_url, raw)
+              return raw
+
+          # The three State Archives plan records are clustered around these IDs.
+          # Scan a narrow range so the third matching record is discovered without guessing its identifier.
+          for node in range(236490, 236531):
+              page_url = f'https://azmemory.azlibrary.gov/nodes/view/{node}'
+              try:
+                  body, ctype, final = get(page_url)
+              except Exception as e:
+                  print('page', node, 'ERROR', repr(e))
+                  continue
+              text = body.decode('utf-8','replace')
+              if phrase.lower() not in text.lower():
+                  continue
+              ident_m = re.search(r'02-\d{4}\.jpg', text, re.I)
+              ident = ident_m.group(0) if ident_m else f'node-{node}.jpg'
+              (out / f'node-{node}.html').write_bytes(body)
+              candidates = []
+              patterns = [
+                  r'https?://azmemory\.azlibrary\.gov/assets/(?:display|original|download)/[^\"\'<>\s]+',
+                  r'/assets/(?:display|original|download)/[^\"\'<>\s]+'
+              ]
+              for pat in patterns:
+                  for m in re.findall(pat, text, re.I):
+                      u = normalize_asset(m, page_url)
+                      if u not in candidates: candidates.append(u)
+              # Prefer full/max display assets over thumbnails.
+              candidates.sort(key=lambda u: (('-max' not in u and 'original' not in u), 'thumb' in u.lower(), len(u)))
+              record = {'node':node,'page_url':page_url,'identifier':ident,'asset_candidates':candidates,'downloaded':[]}
+              for i,u in enumerate(candidates[:12]):
+                  try:
+                      data, actype, finalu = get(u, 45)
+                  except Exception as e:
+                      print('asset', node, i, 'ERROR', repr(e), u)
+                      continue
+                  # Keep only actual image/PDF payloads, not HTML error pages.
+                  magic_ok = data.startswith((b'\xff\xd8\xff', b'\x89PNG', b'%PDF', b'GIF8', b'II*\x00', b'MM\x00*'))
+                  if not magic_ok and not (actype.startswith('image/') or 'pdf' in actype):
+                      continue
+                  ext = '.pdf' if data.startswith(b'%PDF') or 'pdf' in actype else '.jpg'
+                  name = Path(ident).stem + ('' if i == 0 else f'-asset-{i+1}') + ext
+                  p = out / name
+                  if p.exists() and p.read_bytes() == data:
+                      continue
+                  p.write_bytes(data)
+                  record['downloaded'].append({'file':name,'bytes':len(data),'content_type':actype,'url':finalu})
+                  print('DOWNLOADED', node, ident, name, len(data), finalu)
+                  # The first high-resolution matching asset is enough for each plan record.
+                  if len(data) > 10000:
+                      break
+              found.append(record)
+              time.sleep(0.25)
+
+          # Known high-resolution public asset for State Archives identifier 02-0300.jpg.
+          fallback = 'https://azmemory.azlibrary.gov/assets/display/1508154-max?u=92268db151e7e51e3d653b197bf7fe49'
+          if not (out/'02-0300.jpg').exists():
+              try:
+                  data, ct, fu = get(fallback,45)
+                  if data.startswith((b'\xff\xd8\xff', b'\x89PNG', b'II*\x00', b'MM\x00*')) or ct.startswith('image/'):
+                      (out/'02-0300.jpg').write_bytes(data)
+                      print('DOWNLOADED known 02-0300.jpg', len(data), fu)
+              except Exception as e:
+                  print('known asset ERROR', repr(e))
+
+          # Supporting public documentation (not labeled as blueprint sheets).
+          support = [
+            ('National_Register_nomination.pdf','https://npgallery.nps.gov/NRHP/GetAsset/9afe1b5e-0fe2-4207-81e1-5614a3649b86'),
+            ('HABS_data.pdf','https://cdn.loc.gov/master/pnp/habshaer/az/az0200/az0207/data/az0207data.pdf'),
+            ('HABS_captions.pdf','https://cdn.loc.gov/master/pnp/habshaer/az/az0200/az0207/data/az0207cap.pdf')
+          ]
+          for name,u in support:
+              try:
+                  data,ct,fu=get(u,45)
+                  if data.startswith(b'%PDF'):
+                      (out/name).write_bytes(data)
+                      print('DOWNLOADED support',name,len(data))
+              except Exception as e:
+                  print('support ERROR',name,repr(e))
+
+          manifest = {
+            'address':'1700 W Washington St, Phoenix, AZ 85007',
+            'property':'Arizona State Capitol Complex',
+            'archive':'Arizona Memory Project / Arizona State Library, Archives and Public Records',
+            'records':found,
+            'note':'Files named 02-xxxx are public archival scans of 1900 architectural plans. HABS and National Register PDFs are supporting documentation, not blueprint sheets.'
+          }
+          (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
+          (out/'README.txt').write_text(
+            'Arizona State Capitol – public archival plan pull\n'
+            'Address: 1700 W Washington St, Phoenix, AZ 85007\n\n'
+            'The 02-xxxx image files are 1900 architectural-plan scans from the Arizona State Archives / Arizona Memory Project.\n'
+            'National Register and HABS PDFs are included only as supporting historic documentation and are not being represented as blueprint sheets.\n'
+          )
+          print('PLAN RECORDS FOUND:', len(found))
+          print(json.dumps(found, indent=2))
+          PY
+          echo '--- files ---'
+          find arizona-capitol-plans -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          test -s arizona-capitol-plans/manifest.json
+          # Require at least one actual archival plan image before packaging.
+          find arizona-capitol-plans -maxdepth 1 -type f -name '02-*.jpg' -size +10k | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arizona-capitol-public-plans
+          path: arizona-capitol-plans/
+          if-no-files-found: error
+          retention-days: 7
