@@ -1,0 +1,54 @@
+name: Diagnose III Vega from Cloudflare
+on:
+  push:
+    branches: [temp-blueprint-platforms-preview]
+    paths: [.github/workflows/diagnose-iii-vega-worker.yml]
+  workflow_dispatch:
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy minimal Worker and test Arizona catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vega-worker
+          cat >/tmp/vega-worker/worker.mjs <<'EOF'
+          export default {
+            async fetch() {
+              const endpoint='https://na5.iiivega.com/api/search-result/search/format-groups';
+              const body=JSON.stringify({searchText:'1700 W WASHINGTON ST, PHOENIX, AZ, 85007',sorting:'relevance',sortOrder:'asc',searchType:'everything',pageNum:0,pageSize:30,resourceType:'FormatGroup'});
+              try {
+                const r=await fetch(endpoint,{method:'POST',body,headers:{
+                  'Content-Type':'application/json','Accept':'application/json, text/plain, */*','api-version':'2',
+                  'iii-customer-domain':'asli.na5.iiivega.com','iii-host-domain':'asli.na5.iiivega.com',
+                  'Anonymous-User-Id':crypto.randomUUID(),'Origin':'https://asli.na5.iiivega.com/','Referer':'https://asli.na5.iiivega.com/'
+                }});
+                const text=await r.text();
+                return Response.json({ok:r.ok,status:r.status,body:text.slice(0,12000)});
+              } catch(e) {
+                return Response.json({ok:false,error:String(e),stack:e?.stack||null},{status:500});
+              }
+            }
+          }
+          EOF
+          cat >/tmp/vega-worker/wrangler.toml <<'EOF'
+          name = "vega-diagnostic-temp"
+          main = "worker.mjs"
+          compatibility_date = "2026-09-01"
+          compatibility_flags = ["global_fetch_strictly_public"]
+          EOF
+          cd /tmp/vega-worker
+          npx --yes wrangler@4.130.0 deploy --temporary --config wrangler.toml >/tmp/wrangler.out 2>&1
+          sed -E 's#https://dash\.cloudflare\.com/[^ ]+#[claim-url-redacted]#g' /tmp/wrangler.out
+          url=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler.out | tail -1)
+          test -n "$url"
+          for i in $(seq 1 20); do
+            code=$(curl -sS -o /tmp/result -w '%{http_code}' "$url" || true)
+            if [ "$code" != 404 ] && [ -s /tmp/result ]; then break; fi
+            sleep 2
+          done
+          echo "DIAGNOSTIC_URL=$url HTTP=$code"
+          cat /tmp/result
+          grep -q '"status":200' /tmp/result
+          grep -q 'Arizona State Capitol' /tmp/result
