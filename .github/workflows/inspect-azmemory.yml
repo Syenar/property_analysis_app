@@ -8,7 +8,7 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Capture public Arizona catalog network endpoints
+      - name: Capture Arizona catalog API request contract
         shell: bash
         run: |
           set -euo pipefail
@@ -20,28 +20,29 @@ jobs:
           rm -f /tmp/netlog.json /tmp/dom.html
           timeout 45s "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=18000 --log-net-log=/tmp/netlog.json --net-log-capture-mode=IncludeSensitive --dump-dom "$url" > /tmp/dom.html 2>/tmp/chrome.err || true
           grep -q "Architect's plan for the Arizona State Capitol in Phoenix" /tmp/dom.html
+          echo '--- netlog events for search endpoint ---'
           python3 - <<'PY'
-          import json,re
+          import json
           from pathlib import Path
-          p=Path('/tmp/netlog.json')
-          data=json.loads(p.read_text(errors='replace'))
-          urls=[]
-          def walk(x):
-              if isinstance(x,dict):
-                  for k,v in x.items():
-                      if k.lower() in {'url','uri'} and isinstance(v,str) and v.startswith('http'):
-                          urls.append(v)
-                      walk(v)
-              elif isinstance(x,list):
-                  for v in x: walk(v)
-          walk(data)
-          seen=set()
-          for u in urls:
-              if u in seen: continue
-              seen.add(u)
-              if any(s in u.lower() for s in ['api','search','query','graphql','formatgroup','record','vega','polaris','discovery']):
-                  print(u)
-          print('UNIQUE_URLS',len(seen))
+          data=json.loads(Path('/tmp/netlog.json').read_text(errors='replace'))
+          needle='/api/search-result/search/format-groups'
+          for e in data.get('events',[]):
+              text=json.dumps(e,ensure_ascii=False)
+              if needle in text or ('UPLOAD' in text and 'Architect' in text):
+                  print(json.dumps(e,ensure_ascii=False,indent=2)[:12000])
           PY
-          echo '--- likely JSON responses / request URLs from netlog strings ---'
-          grep -Eo 'https?[^" ]+' /tmp/netlog.json | sed 's/\\u0026/\&/g' | grep -Ei 'api|search|query|graphql|record|formatgroup|polaris|discovery' | sort -u | head -200 || true
+          echo '--- search JS endpoint context ---'
+          curl -fsSL "$base/src_app_search_search_module_ts.f2046c7e74979d74.js" -o /tmp/search.js
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('/tmp/search.js').read_text(errors='replace')
+          for needle in ['search/format-groups','format-groups','search-result/search']:
+              start=0
+              print('\nNEEDLE',needle)
+              while True:
+                  i=s.find(needle,start)
+                  if i<0: break
+                  print(s[max(0,i-2500):i+3500])
+                  start=i+len(needle)
+                  if start>i+len(needle)+1: break
+          PY
