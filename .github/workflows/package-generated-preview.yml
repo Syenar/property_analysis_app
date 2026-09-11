@@ -1,0 +1,51 @@
+name: Package Generated Preview
+
+on:
+  push:
+    branches: [temp-cloudflare-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Reproduce generated preview source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/deploy-cloudflare.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(src) if line.strip() == '- name: Apply preview updates')
+          run_line = next(i for i in range(start + 1, len(src)) if src[i].strip() == 'run: |')
+          body = []
+          for line in src[run_line + 1:]:
+              if line.startswith('      - name:') or line.startswith('      - uses:'):
+                  break
+              body.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply-preview-updates.sh').write_text('\n'.join(body) + '\n')
+          PY
+          bash /tmp/apply-preview-updates.sh
+      - name: Create project ZIP
+        shell: bash
+        run: |
+          rm -f /tmp/property-analysis-app-blueprint-fixed.zip
+          zip -qr /tmp/property-analysis-app-blueprint-fixed.zip . \
+            -x '.git/*' 'node_modules/*' '*.log' '.DS_Store'
+          unzip -t /tmp/property-analysis-app-blueprint-fixed.zip
+          sha256sum /tmp/property-analysis-app-blueprint-fixed.zip
+      - name: Upload project ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: property-analysis-app-blueprint-fixed
+          path: /tmp/property-analysis-app-blueprint-fixed.zip
+          if-no-files-found: error
+          retention-days: 30
