@@ -11,7 +11,7 @@ export class PropertyResearchEngine {
     Object.assign(this, { geocoder, discovery, arcgis, wfs, genericRest, staticGis, registry, ordinanceDiscovery, documentDownloader, store, sourcePolicy });
   }
 
-  async run(address, { fetchOrdinanceDocuments = true, maxGisCandidates = 8, maxOrdinanceDocuments = 3, onProgress = null, signal = null } = {}) {
+  async run(address, { fetchOrdinanceDocuments = true, fetchBlueprintDocuments = true, maxGisCandidates = 8, maxOrdinanceDocuments = 3, maxBlueprintDocuments = 3, onProgress = null, signal = null } = {}) {
     const warnings = [];
     const provenance = [];
     const emit = async (stage, status = 'active', detail = null, extra = {}) => {
