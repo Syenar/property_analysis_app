@@ -1,0 +1,32 @@
+name: Verify Live Blueprint Preview
+on:
+  push:
+    branches: [temp-blueprint-platforms-preview]
+    paths: [.github/workflows/verify-live-blueprint-preview.yml]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Phoenix Capitol plans on live Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://property-analysis-temp-syenar.band-cheek.workers.dev'
+          healthy=0
+          for attempt in $(seq 1 20); do
+            code=$(curl -sS -o /tmp/health -w '%{http_code}' "$url/api/health" || true)
+            if [ "$code" = 200 ] && grep -q '"ok"' /tmp/health; then healthy=1; break; fi
+            sleep 2
+          done
+          test "$healthy" -eq 1
+          code=$(timeout 120s curl -sS --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1700 W WASHINGTON ST, PHOENIX, AZ, 85007","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":4,"maxBlueprintDocuments":4}' "$url/api/research/stream")
+          echo "HTTP $code"
+          cat /tmp/research.ndjson
+          test "$code" = 200
+          grep -q '"type":"result"' /tmp/research.ndjson
+          grep -q '"stage":"plans"' /tmp/research.ndjson
+          grep -q '236509' /tmp/research.ndjson
+          grep -q '236514' /tmp/research.ndjson
+          grep -q '236520' /tmp/research.ndjson
+          ! grep -q '"type":"error"' /tmp/research.ndjson
+          echo 'Verified all three Arizona Capitol architectural-plan records on the live Worker.'
