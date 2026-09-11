@@ -99,6 +99,11 @@ jobs:
           s=s.replace("address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, fetchOrdinanceDocuments:true", "address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, maxBlueprintDocuments:10, fetchOrdinanceDocuments:true, fetchBlueprintDocuments:true")
           p.write_text(s)
           PY
+          echo '--- generated blueprint discovery ---'
+          sed -n '1,320p' src/plans/blueprint-discovery.mjs
+          echo '--- generated engine plans block ---'
+          grep -n -A160 -B30 "Searching public permit" src/engine/property-research-engine.mjs || true
+          echo '--- end generated plan trace ---'
           grep -q "import { rethrowIfAborted } from '../core/abort.mjs';" src/engine/property-research-engine.mjs
           npm test
           npm run check
