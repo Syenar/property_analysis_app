@@ -8,29 +8,32 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy minimal Worker and test Arizona catalog
+      - name: Deploy minimal Worker and test Arizona catalog queries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/vega-worker
           cat >/tmp/vega-worker/worker.mjs <<'EOF'
-          export default {
-            async fetch() {
-              const endpoint='https://na5.iiivega.com/api/search-result/search/format-groups';
-              const body=JSON.stringify({searchText:'1700 W WASHINGTON ST, PHOENIX, AZ, 85007',sorting:'relevance',sortOrder:'asc',searchType:'everything',pageNum:0,pageSize:30,resourceType:'FormatGroup'});
-              try {
-                const r=await fetch(endpoint,{method:'POST',body,headers:{
-                  'Content-Type':'application/json','Accept':'application/json, text/plain, */*','api-version':'2',
-                  'iii-customer-domain':'asli.na5.iiivega.com','iii-host-domain':'asli.na5.iiivega.com',
-                  'Anonymous-User-Id':crypto.randomUUID(),'Origin':'https://asli.na5.iiivega.com/','Referer':'https://asli.na5.iiivega.com/'
-                }});
-                const text=await r.text();
-                return Response.json({ok:r.ok,status:r.status,body:text.slice(0,12000)});
-              } catch(e) {
-                return Response.json({ok:false,error:String(e),stack:e?.stack||null},{status:500});
-              }
-            }
+          const endpoint='https://na5.iiivega.com/api/search-result/search/format-groups';
+          async function search(searchText){
+            const body=JSON.stringify({searchText,sorting:'relevance',sortOrder:'asc',searchType:'everything',pageNum:0,pageSize:30,resourceType:'FormatGroup'});
+            const r=await fetch(endpoint,{method:'POST',body,headers:{
+              'Content-Type':'application/json','Accept':'application/json, text/plain, */*','api-version':'2',
+              'iii-customer-domain':'asli.na5.iiivega.com','iii-host-domain':'asli.na5.iiivega.com',
+              'Anonymous-User-Id':crypto.randomUUID(),'Origin':'https://asli.na5.iiivega.com/','Referer':'https://asli.na5.iiivega.com/'
+            }});
+            const data=await r.json();
+            return {status:r.status,totalResults:data.totalResults,titles:(data.data||[]).slice(0,12).map(x=>({title:x.title,urls:(x.materialTabs||[]).flatMap(t=>t.availability?.urls||[])}))};
           }
+          export default {async fetch(){
+            try {
+              return Response.json({
+                normalized:await search('1700 W Washington St Phoenix AZ'),
+                aliasPlans:await search('Arizona State Capitol architectural drawings'),
+                aliasArchitect:await search('Arizona State Capitol architect plan')
+              });
+            } catch(e){return Response.json({error:String(e),stack:e?.stack||null},{status:500});}
+          }}
           EOF
           cat >/tmp/vega-worker/wrangler.toml <<'EOF'
           name = "vega-diagnostic-temp"
@@ -45,10 +48,12 @@ jobs:
           test -n "$url"
           for i in $(seq 1 20); do
             code=$(curl -sS -o /tmp/result -w '%{http_code}' "$url" || true)
-            if [ "$code" != 404 ] && [ -s /tmp/result ]; then break; fi
+            if [ "$code" = 200 ] && [ -s /tmp/result ]; then break; fi
             sleep 2
           done
           echo "DIAGNOSTIC_URL=$url HTTP=$code"
           cat /tmp/result
-          grep -q '"status":200' /tmp/result
-          grep -q 'Arizona State Capitol' /tmp/result
+          grep -q 'Arizona State Capitol building in Phoenix' /tmp/result
+          grep -q '236509' /tmp/result
+          grep -q '236514' /tmp/result
+          grep -q '236520' /tmp/result
