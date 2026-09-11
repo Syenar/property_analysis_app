@@ -33,4 +33,26 @@ jobs:
           text = re.sub(r'(?im)^.*claim(?:ing)?(?: url| link| token)?.*$', '[Cloudflare claim information redacted]', text)
           print(text)
           PY
-          exit "$status"
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          url=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler.out | tail -n 1)
+          test -n "$url"
+          echo "Public preview: $url"
+          curl --fail --silent --show-error "$url/api/health" | tee /tmp/health.json
+          grep -q '"ok"' /tmp/health.json
+          set +e
+          timeout 30s curl --silent --show-error --no-buffer \
+            -H 'content-type: application/json' \
+            --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"maxGisCandidates":1,"maxOrdinanceDocuments":1}' \
+            "$url/api/research/stream" > /tmp/research.ndjson
+          research_status=$?
+          set -e
+          head -n 20 /tmp/research.ndjson || true
+          if grep -Fqi 'Illegal invocation' /tmp/research.ndjson; then
+            echo 'Cloudflare illegal-invocation regression detected.' >&2
+            exit 1
+          fi
+          if [ ! -s /tmp/research.ndjson ]; then
+            echo "Research stream produced no response (curl status $research_status)." >&2
+            exit 1
+          fi
+          echo 'Live Cloudflare research smoke check passed.'
