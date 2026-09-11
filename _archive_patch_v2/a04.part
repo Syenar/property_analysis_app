@@ -1,0 +1,104 @@
+| '');
+      const signalRow=planSignal(`${title} ${classified?.title || ''} ${classified?.description || ''} ${mediaType}`) || { type:classified?.planType || 'architectural-plan', score:16 };
+      const automation=this.policy.decision(url, { official:officialHost(url), kind:'blueprint', title, description:classified?.description || '' });
+      assets.push({
+        kind:'blueprint-candidate', discoverySource:'archive-catalog-asset', title,
+        description:`Media asset exposed by ${provider.name} catalog record ${classified?.url || result.url}`,
+        url, planType:signalRow.type, official:officialHost(url), directDocument:true, catalogRecord:false,
+        catalogParentUrl:classified?.url || result.url, catalogRecordTitle:classified?.title || result.title || null, recordAccess:'linked',
+        confidence:Math.min(100, (classified?.confidence || 60) + 4),
+        confidenceReasons:[...(classified?.confidenceReasons || []), 'archive-media-api-asset'],
+        matchEvidence:classified?.matchEvidence || null, automation, mediaType:mediaType || null,
+        metadataSource:provider.harvestedCatalog?.name || provider.name, archiveProviderId:provider.id
+      });
+    }
+    return dedupeSources(assets);
+  }
+
+  async searchHarvestedProvider(provider, jurisdiction, { address, parcel, aliases = [], ids = [], signal } = {}) {
+    if (!provider?.harvestedCatalog) return { attempted:false, succeeded:false, aliases:[], sources:[] };
+    const foundAliases = [];
+    const sources = [];
+    let succeeded = false;
+    let errorMessage = null;
+    try {
+      const identityRows = await this.searchHarvestedCatalog(provider, address, { signal, pageSize:Math.max(20, provider.harvestedCatalog.pageSize || 30) });
+      succeeded = true;
+      for (const result of identityRows) {
+        const evidence = addressEvidence(`${result.title || ''} ${result.description || ''}`, address);
+        if (!evidence.matched) continue;
+        const alias = catalogIdentityAlias(result.title, jurisdiction);
+        if (!alias) continue;
+        foundAliases.push({ value:alias, source:result.url, confidence:96, providerId:provider.id });
+      }
+      const combinedAliases = dedupeAliases([...(aliases || []), ...foundAliases]);
+      const searchAliases = combinedAliases.filter((row) => (row.confidence || 0) >= 65).slice(0, 5);
+      const seenQueries = new Set();
+      const planQueries = [];
+      for (const alias of searchAliases) {
+        const value = String(alias.value || '').trim();
+        if (!value) continue;
+        for (const term of (provider.planTerms || ['architectural drawings','architect plan','building plans']).slice(0, 5)) {
+          const query = `${value} ${term}`;
+          const key = normalize(query);
+          if (!seenQueries.has(key)) { seenQueries.add(key); planQueries.push(query); }
+        }
+      }
+      // An address-scoped plan query remains useful when the catalog metadata itself contains the street address.
+      for (const term of (provider.planTerms || ['architectural drawings']).slice(0, 2)) {
+        const query = `${address} ${term}`;
+        const key = normalize(query);
+        if (!seenQueries.has(key)) { seenQueries.add(key); planQueries.push(query); }
+      }
+      for (const query of planQueries.slice(0, 12)) {
+        throwIfAborted(signal);
+        const rows = await this.searchHarvestedCatalog(provider, query, { signal });
+        succeeded = true;
+        for (const result of rows) {
+          const classified = classifyResult(result, {
+            jurisdiction, address, aliases:combinedAliases, ids, policy:this.policy,
+            discoverySource:'archive-harvested-catalog', catalogRecord:true,
+            recordAccess:provider.directAutomation === 'browser-challenge' ? 'blocked' : 'link-only'
+          });
+          if (!classified) continue;
+          const enriched = {
+            ...classified,
+            metadataSource:provider.harvestedCatalog.name || null,
+            metadataSourceUrl:provider.harvestedCatalog.catalogUrl || null,
+            archiveProviderId:provider.id,
+            publicationDate:result.publicationDate,
+            archiveRecordIds:result.archiveRecordIds,
+            previewImageUrl:result.previewImageUrl,
+            blockReason:provider.directAutomation === 'browser-challenge' ? 'archive-record-browser-challenge' : classified.blockReason
+          };
+          sources.push(enriched);
+          sources.push(...await this.expandHarvestedAssets(provider, result, enriched, { signal }));
+        }
+      }
+      return { attempted:true, succeeded, aliases:foundAliases, sources:dedupeSources(sources), error:null };
+    } catch (error) {
+      rethrowIfAborted(error, signal);
+      errorMessage = error?.message || String(error);
+      return { attempted:true, succeeded:false, aliases:foundAliases, sources:dedupeSources(sources), error:errorMessage };
+    }
+  }
+
+  async discoverIdentityAliases(jurisdiction, { address, parcel, signal } = {}) {
+    const aliases = propertyAliasesFromParcel(parcel);
+    if (!this.webSearch?.available?.()) return aliases;
+    const place = [jurisdiction?.municipality, jurisdiction?.state].filter(Boolean).join(' ');
+    const queries = [`"${address}" ${place}`.trim(), `"${address}" official building`];
+    for (const query of queries) {
+      throwIfAborted(signal);
+      let results = [];
+      try { results = await this.webSearch.search(query, { count:8, signal }); }
+      catch (error) { rethrowIfAborted(error, signal); continue; }
+      for (const result of results) {
+        const evidence = addressEvidence(`${result.description || ''} ${result.url || ''}`, address);
+        if (!evidence.matched) continue;
+        const title = cleanedTitle(result.title);
+        if (!title || title.length < 5 || title.length > 120 || /^(home|welcome|search|property search|maps?)$/i.test(title)) continue;
+        aliases.push({ value:title, source:result.url, confidence:officialHost(result.url) ? 88 : 68 });
+      }
+    }
+    
