@@ -14,9 +14,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
 
 export class HttpClient {
-  constructor({ fetchFn = globalThis.fetch, timeoutMs = 20000, retries = 2, userAgent = 'PropertyZoningResearchEngine/0.2 (+source-first research)', maxRedirects = 5, urlValidator = null, trustedHosts = [] } = {}) {
-    if (!fetchFn) throw new Error('A fetch implementation is required');
-    this.fetchFn = fetchFn;
+  constructor({ fetchFn = null, timeoutMs = 20000, retries = 2, userAgent = 'PropertyZoningResearchEngine/0.2 (+source-first research)', maxRedirects = 5, urlValidator = null, trustedHosts = [] } = {}) {
+    const resolvedFetch = fetchFn || (typeof globalThis.fetch === 'function' ? (...args) => globalThis.fetch(...args) : null);
+    if (!resolvedFetch) throw new Error('A fetch implementation is required');
+    this.fetchFn = resolvedFetch;
     this.timeoutMs = timeoutMs;
     this.retries = retries;
     this.userAgent = userAgent;
