@@ -106,6 +106,9 @@ jobs:
           grep -q 'blueprintResearch' web/app.js
           grep -q 'blueprintResearch' src/packets/research-packet.mjs
           grep -q 'permit-record-attachment' src/plans/blueprint-discovery.mjs
+          echo '--- browser building-document state logic ---'
+          grep -n -A35 -B20 'blueprintResearch' web/app.js | head -120 || true
+          echo '--- end browser building-document state logic ---'
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
@@ -131,7 +134,7 @@ jobs:
               healthy=1
               break
             fi
-            echo "Waiting for public Worker routing (attempt $attempt, HTTP $code)..."
+            echo "Waiting for public Worker health routing (attempt $attempt, HTTP $code)..."
             sleep 2
           done
           if [ "$healthy" -ne 1 ]; then
@@ -140,10 +143,21 @@ jobs:
             exit 1
           fi
           cat /tmp/health
-          timeout 90s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
+          research_ready=0
+          for attempt in $(seq 1 15); do
+            : > /tmp/research.ndjson
+            code=$(timeout 90s curl --silent --show-error --no-buffer -o /tmp/research.ndjson -w '%{http_code}' -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" || true)
+            if [ "$code" = "200" ] && grep -q '"type":"result"' /tmp/research.ndjson; then
+              research_ready=1
+              break
+            fi
+            echo "Waiting for public Worker research routing (attempt $attempt, HTTP $code)..."
+            sleep 2
+          done
           echo '--- research stream ---'
           cat /tmp/research.ndjson
           echo '--- end research stream ---'
+          test "$research_ready" -eq 1
           grep -q '"stage":"plans"' /tmp/research.ndjson
           grep -q '"type":"result"' /tmp/research.ndjson
           grep -q '"blueprintResearch":{"attempted":true' /tmp/research.ndjson
