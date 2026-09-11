@@ -8,39 +8,26 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe archive and credential-free development index
+      - name: Probe Arizona State Research Library catalog
         shell: bash
         run: |
           set -u
           ua='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36'
-          echo '--- Arizona Memory direct routes ---'
-          for url in \
-            'https://azmemory.azlibrary.gov/robots.txt' \
-            'https://azmemory.azlibrary.gov/sitemap.xml' \
-            'https://azmemory.azlibrary.gov/nodes/search' \
-            'https://azmemory.azlibrary.gov/nodes/view/236509' \
-            'https://azmemory.azlibrary.gov/nodes/view/236514'; do
-            code=$(curl -A "$ua" -L -sS -o /tmp/body -w '%{http_code}' "$url" || true)
-            echo "$code $url bytes=$(wc -c </tmp/body 2>/dev/null || echo 0)"
+          base='https://asli.na5.iiivega.com'
+          for query in 'Arizona State Capitol' 'Architects plan for the Arizona State Capitol in Phoenix' '02-0299' '02-0300'; do
+            url="$base/search?query=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")&searchType=everything&pageSize=20"
+            code=$(curl -A "$ua" -L -sS -o /tmp/vega.html -w '%{http_code}' "$url" || true)
+            echo "=== $query === HTTP $code final-size=$(wc -c </tmp/vega.html 2>/dev/null || echo 0)"
+            grep -Eio '.{0,160}(Arizona State Capitol|02-0299|02-0300|architectural drawing|azmemory|236509|236514).{0,240}' /tmp/vega.html | head -80 || true
+            echo '--- URLs/API hints ---'
+            grep -Eo 'https?://[^"<> ]+|/[A-Za-z0-9_./?=&%-]*(api|search)[A-Za-z0-9_./?=&%-]*' /tmp/vega.html | grep -Ei 'api|search|graphql|record' | head -80 || true
           done
-          echo '--- Purili development fallback searches ---'
-          python3 - <<'PY'
-          import json, urllib.parse, urllib.request
-          queries=[
-            '"1700 W Washington St" Phoenix architectural drawings',
-            '"Arizona State Capitol" architectural drawings',
-            'site:azmemory.azlibrary.gov "Arizona State Capitol" architectural drawings',
-            'site:azmemory.azlibrary.gov "Architect\'s plan for the Arizona State Capitol in Phoenix"',
-          ]
-          for q in queries:
-            url='https://puri.li/api/search?'+urllib.parse.urlencode({'q':q,'page':1,'exact':1})
-            req=urllib.request.Request(url,headers={'Accept':'application/json','User-Agent':'PropertyAnalysisApp/0.3 archive-discovery-test'})
-            try:
-              with urllib.request.urlopen(req,timeout=20) as resp:
-                data=json.load(resp)
-              print('\nQUERY',q,'results',len(data.get('results',[])))
-              for r in data.get('results',[])[:10]:
-                print(r.get('title',''), r.get('url',''), '-', r.get('description','')[:180])
-            except Exception as e:
-              print('\nQUERY',q,'ERROR',repr(e))
-          PY
+          echo '--- JS bundle API strings from catalog home ---'
+          curl -A "$ua" -L -sS "$base/" -o /tmp/home.html || true
+          grep -Eo '<script[^>]+src="[^"]+' /tmp/home.html | sed -E 's/.*src="//' | head -20 > /tmp/scripts.txt || true
+          while read -r src; do
+            [ -z "$src" ] && continue
+            case "$src" in http*) u="$src";; /*) u="$base$src";; *) u="$base/$src";; esac
+            curl -A "$ua" -L -sS "$u" -o /tmp/bundle.js || continue
+            grep -Eio '.{0,100}(graphql|/api/|search[^" ]{0,100}|recordId).{0,180}' /tmp/bundle.js | head -60 || true
+          done < /tmp/scripts.txt
