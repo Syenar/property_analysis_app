@@ -156,7 +156,7 @@ export class SourceDiscoveryEngine {
     };
   }
 
-  async discoverOfficialWebSources(jurisdiction, purpose, extraQueries = []) {
+  async discoverOfficialWebSources(jurisdiction, purpose, extraQueries = [], { signal } = {}) {
     const queryRows = [];
     if (purpose === 'ordinance') {
       for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty: !jurisdiction.municipality })) {
@@ -164,6 +164,14 @@ export class SourceDiscoveryEngine {
           { ...row, q:`${row.place} zoning ordinance` },
           { ...row, q:`${row.place} zoning code` },
           { ...row, q:`${row.place} zoning amendments` }
+        );
+      }
+    } else if (purpose === 'blueprint') {
+      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true })) {
+        queryRows.push(
+          { ...row, q:`${row.place} building permit plans drawings` },
+          { ...row, q:`${row.place} permit portal architectural plans` },
+          { ...row, q:`${row.place} planning development plan attachments` }
         );
       }
     } else {
@@ -185,7 +193,7 @@ export class SourceDiscoveryEngine {
 
     const results = [];
     for (const row of queryRows) {
-      const found = await this.webSearch.search(row.q, { count: 10 });
+      const found = await this.webSearch.search(row.q, { count: 10, signal });
       for (const result of found) results.push({ ...result, discoveryScope: result.discoveryScope || row.scope, discoveryQuery: row.q });
     }
     const unique = new Map();
