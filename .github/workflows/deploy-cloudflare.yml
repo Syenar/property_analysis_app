@@ -138,6 +138,9 @@ jobs:
           grep -q '"type":"result"' /tmp/research.ndjson
           ! grep -q '"type":"error"' /tmp/research.ndjson
           ! grep -Fqi 'rethrowIfAborted is not defined' /tmp/research.ndjson
+          ! grep -Fqi 'signal is not defined' /tmp/research.ndjson
+          ! grep -Fqi 'fetchBlueprintDocuments is not defined' /tmp/research.ndjson
+          ! grep -Fqi 'maxBlueprintDocuments is not defined' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
           ! grep -Fqi 'error code: 1042' /tmp/research.ndjson
           echo 'Live blueprint research completed without stream errors.'
