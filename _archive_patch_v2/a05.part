@@ -1,0 +1,99 @@
+ return dedupeAliases(aliases);
+  }
+
+  async searchLibraryOfCongress(jurisdiction, { address, aliases, ids, signal } = {}) {
+    if (!this.http) return [];
+    const terms = [address, ...(aliases || []).slice(0, 3).map((x) => x.value || x)].filter(Boolean);
+    const rows = [];
+    for (const term of terms.slice(0, 4)) {
+      throwIfAborted(signal);
+      const query = `"${term}" architectural drawings building plans`;
+      const url = new URL('https://www.loc.gov/search/');
+      url.searchParams.set('fo','json'); url.searchParams.set('c','20'); url.searchParams.set('q', query);
+      let data;
+      try { data = await this.http.getJson(url.toString(), { signal, headers:{ Accept:'application/json' } }); }
+      catch (error) { rethrowIfAborted(error, signal); continue; }
+      for (const raw of data.results || []) {
+        const result = locResultToSearchResult(raw, query);
+        const classified = classifyResult(result, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'library-of-congress', catalogRecord:true });
+        if (classified) rows.push(classified);
+      }
+    }
+    return dedupeSources(rows);
+  }
+
+  async inspectRecord(result, context) {
+    const { jurisdiction, address, aliases, ids, signal } = context;
+    throwIfAborted(signal);
+    const policy = this.policy.decision(result.url, { official:officialHost(result.url), kind:'blueprint', title:result.title, description:result.description });
+    if (policy.action !== 'fetch') {
+      return classifyResult({ ...result, catalogRecord:true }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'link-only' });
+    }
+    if (this.robots) {
+      try {
+        const robots = await this.robots.decision(result.url, { signal });
+        if (!robots.allowed) {
+          return classifyResult({ ...result, catalogRecord:true, blockReason:robots.reason }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'blocked' });
+        }
+      } catch (error) { rethrowIfAborted(error, signal); }
+    }
+    let html;
+    try {
+      const fetched = await this.http.getText(result.url, { signal, headers:{ Accept:'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2' } });
+      html = fetched.text;
+    } catch (error) {
+      rethrowIfAborted(error, signal);
+      if (error instanceof HttpError && [401,403,429].includes(error.status)) {
+        return classifyResult({ ...result, catalogRecord:true, blockReason:`http-${error.status}` }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'blocked' });
+      }
+      return classifyResult({ ...result, catalogRecord:true }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'unavailable' });
+    }
+    const page = extractCatalogPage(html, result.url);
+    const record = classifyResult({ ...result, title:page.title || result.title, description:page.description || result.description, text:page.combined, catalogRecord:true }, {
+      jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'fetched'
+    });
+    if (!record) return null;
+    const assets = [];
+    for (const link of page.links) {
+      if (!looksLikeAsset(link.url)) continue;
+      const assetSignal = planSignal(`${link.text || ''} ${record.title || ''} ${record.description || ''}`) || { type:record.planType, score:16 };
+      const automation = this.policy.decision(link.url, { official:officialHost(link.url), kind:'blueprint', title:record.title, description:record.description });
+      assets.push({
+        kind:'blueprint-candidate', discoverySource:'archive-catalog-asset', title:`${record.title || 'Architectural plan'} — archive asset`,
+        description:`Direct asset linked from official archive/catalog record ${record.url}`,
+        url:link.url, planType:assetSignal.type || record.planType, official:officialHost(link.url), directDocument:true, catalogRecord:false,
+        catalogParentUrl:record.url, catalogRecordTitle:record.title || null, recordAccess:'linked',
+        confidence:Math.min(100, (record.confidence || 60) + 4),
+        confidenceReasons:[...(record.confidenceReasons || []), 'archive-linked-asset'], matchEvidence:record.matchEvidence, automation
+      });
+    }
+    return { record, assets:dedupeSources(assets).slice(0, 6), page };
+  }
+
+  async discover(jurisdiction, { address, parcel = null, seedResults = [], signal } = {}) {
+    throwIfAborted(signal);
+    const ids = parcelIdentifiers(parcel);
+    let aliases = await this.discoverIdentityAliases(jurisdiction, { address, parcel, signal });
+    const webSearchAvailable = Boolean(this.webSearch?.available?.());
+    const archiveProviders = applicableArchiveProviders(jurisdiction, this.archiveProviders);
+    const providerOutcomes = new Map();
+    const providerSources = [];
+    for (const provider of archiveProviders) {
+      const outcome = await this.searchHarvestedProvider(provider, jurisdiction, { address, parcel, aliases, ids, signal });
+      providerOutcomes.set(provider.id, outcome);
+      aliases = dedupeAliases([...aliases, ...(outcome.aliases || [])]);
+      providerSources.push(...(outcome.sources || []));
+    }
+    const archiveProviderStatuses = archiveProviders.map((provider) => {
+      const outcome = providerOutcomes.get(provider.id);
+      return archiveProviderStatus(provider, {
+        searchAvailable:webSearchAvailable,
+        harvestedSearchAttempted:Boolean(outcome?.attempted),
+        harvestedSearchSucceeded:Boolean(outcome?.succeeded),
+        harvestedSearchError:outcome?.error || null
+      });
+    });
+    const rawResults = [...seedResults];
+
+    if (webSearchAvailable) {
+      const terms = [address, ...aliases.slice(0, 4).map((x) => x.
