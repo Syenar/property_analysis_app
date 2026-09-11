@@ -1,0 +1,28 @@
+atalog`;
+  const blocked = !searched && provider.directAutomation === 'browser-challenge';
+  return {
+    id:provider.id,
+    name:provider.name,
+    host:provider.host,
+    catalogUrl:provider.catalogUrl,
+    searchUrl:provider.searchUrl,
+    authority:provider.authority,
+    sourceType:provider.sourceType,
+    applicable:true,
+    searched,
+    searchMethod,
+    directAutomation:provider.directAutomation,
+    harvestedCatalog:provider.harvestedCatalog ? {
+      type:provider.harvestedCatalog.type,
+      name:provider.harvestedCatalog.name,
+      catalogUrl:provider.harvestedCatalog.catalogUrl || provider.catalogUrl || null
+    } : null,
+    harvestedSearchAttempted:Boolean(harvestedSearchAttempted),
+    harvestedSearchSucceeded:harvested,
+    harvestedSearchError:harvestedSearchError ? String(harvestedSearchError).slice(0, 300) : null,
+    blocked,
+    limitation:provider.limitation || null
+  };
+}
+
+export { PROVIDERS as ARCHIVE_PROVIDERS, SUPPORTED_CATALOG_TYPES };

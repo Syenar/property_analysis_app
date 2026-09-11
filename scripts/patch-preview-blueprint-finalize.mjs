@@ -24,12 +24,21 @@ await replaceRequired(
 console.log('Blueprint finalization patch applied.');
 
 const archiveParts = await Promise.all([
-  '_archive_patch/a00.part',
-  '_archive_patch/a01.part',
-  '_archive_patch/a02.part',
-  '_archive_patch/a03.part',
-  '_archive_patch/a04.part'
+  '_archive_patch_v2/a00.part',
+  '_archive_patch_v2/a01.part',
+  '_archive_patch_v2/a02.part',
+  '_archive_patch_v2/a03.part',
+  '_archive_patch_v2/a04.part',
+  '_archive_patch_v2/a05.part',
+  '_archive_patch_v2/a06.part'
 ].map((part) => readFile(part, 'utf8')));
 await writeFile('src/plans/archive-catalog-discovery.mjs', archiveParts.join(''));
+
+const providerParts = await Promise.all([
+  '_archive_patch_v2/r00.part',
+  '_archive_patch_v2/r01.part'
+].map((part) => readFile(part, 'utf8')));
+await writeFile('src/plans/archive-provider-registry.mjs', providerParts.join(''));
+
 await import('./patch-preview-archive.mjs');
-console.log('Deterministic archive/catalog discovery wired into preview build.');
+console.log('Deterministic archive/catalog discovery and reusable provider adapters wired into preview build.');
