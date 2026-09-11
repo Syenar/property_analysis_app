@@ -34,6 +34,9 @@ jobs:
           s=s.replace("`  firstFeature(result) {\\n`,", "`  firstFeature(result) { return result?.features?.[0] || null; }\\n`,", 1)
           s=s.replace("  firstFeature(result) {\\n\");", "  firstFeature(result) { return result?.features?.[0] || null; }\\n\");", 1)
           s=s.replace('${row.place}', r'\${row.place}')
+          legacy = "    } else {\\n      // Parcel ownership/geometry is frequently maintained by the county even\\n"
+          preview = "    } else {\\n      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true, includeState:true })) {\\n"
+          s=s.replace(legacy, preview, 2)
           p.write_text(s)
           PY
           node --check /tmp/blueprints.mjs
