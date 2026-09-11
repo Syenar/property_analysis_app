@@ -113,8 +113,22 @@ jobs:
           url=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler.out | tail -1)
           test -n "$url"
           echo "Public preview: $url"
-          for i in $(seq 1 20); do curl -fsS "$url/api/health" >/tmp/health && break || sleep 2; done
-          grep -q '"ok"' /tmp/health
+          healthy=0
+          for attempt in $(seq 1 20); do
+            code=$(curl --silent --show-error -o /tmp/health -w '%{http_code}' "$url/api/health" || true)
+            if [ "$code" = "200" ] && grep -q '"ok"' /tmp/health; then
+              healthy=1
+              break
+            fi
+            echo "Waiting for public Worker routing (attempt $attempt, HTTP $code)..."
+            sleep 2
+          done
+          if [ "$healthy" -ne 1 ]; then
+            echo 'Temporary Worker never became healthy.' >&2
+            cat /tmp/health >&2 || true
+            exit 1
+          fi
+          cat /tmp/health
           timeout 30s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
           grep -q '"stage":"plans"' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
