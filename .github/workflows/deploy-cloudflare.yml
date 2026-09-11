@@ -25,6 +25,7 @@ jobs:
           node scripts/patch-preview-app-view.mjs
           node scripts/patch-preview-app-render.mjs
           node scripts/patch-preview-engine.mjs
+          node scripts/patch-preview-tests.mjs
       - name: Verify updated preview source
         run: |
           npm test
@@ -33,10 +34,10 @@ jobs:
       - name: Persist parcel update on preview branch
         shell: bash
         run: |
-          if ! git diff --quiet -- web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs; then
+          if ! git diff --quiet -- web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs tests/engine.test.mjs; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs
+            git add web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs tests/engine.test.mjs
             git commit -m "Improve parcel match evidence and viewer accuracy"
             git push origin HEAD:temp-cloudflare-preview
           fi
