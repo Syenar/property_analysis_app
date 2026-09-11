@@ -1,5 +1,6 @@
 import { buildResearchPacket, packetToMarkdown } from '../packets/research-packet.mjs';
 import { zoningIdentifiers } from '../indexing/text-index.mjs';
+import { rethrowIfAborted } from '../core/abort.mjs';
 import { candidateExtentContains } from './research-helpers.mjs';
 import { createSourceInspector } from './source-inspector.mjs';
 import { findParcel } from './parcel-stage.mjs';
@@ -82,6 +83,7 @@ export class PropertyResearchEngine {
       const byUrl = new Map([...ordinanceSources, ...discovered].filter((x) => x?.url).map((x) => [x.url, x]));
       ordinanceSources = [...byUrl.values()].sort((a,b) => (b.confidence || 0) - (a.confidence || 0));
     } catch (error) {
+      rethrowIfAborted(error);
       warnings.push(`Ordinance discovery failed: ${error.message}`);
     }
     await emit('ordinance', ordinanceSources.length ? 'done' : 'failed', ordinanceSources.length
@@ -97,6 +99,7 @@ export class PropertyResearchEngine {
           documents.push(document);
           if (document.fetched) provenance.push({ kind:'ordinance-document', url:candidate.url, retrievedAt:document.retrievedAt });
         } catch (error) {
+          rethrowIfAborted(error);
           warnings.push(`Document fetch failed: ${candidate.url}: ${error.message}`);
         }
       }
