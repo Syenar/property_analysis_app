@@ -78,20 +78,124 @@ function zoningLabel(properties = {}) {
   return preferred ? safeText(properties[preferred]) : 'Intersecting zoning feature';
 }
 
-function svgParcelPath(geometry) {
-  const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates?.[0] : null;
-  const ring = rings?.[0];
-  if (!Array.isArray(ring) || ring.length < 3) return '';
-  const xs = ring.map((p) => p[0]); const ys = ring.map((p) => p[1]);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const w = Math.max(maxX - minX, 1e-9), h = Math.max(maxY - minY, 1e-9);
-  const pad = 12, vw = 396, vh = 166;
-  return ring.map(([x,y],i) => {
-    const px = pad + ((x - minX) / w) * (vw - pad * 2);
-    const py = pad + (1 - ((y - minY) / h)) * (vh - pad * 2);
-    return `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`;
-  }).join(' ') + ' Z';
+function parcelGeometryRings(geometry) {
+  if (geometry?.type === 'Polygon') return Array.isArray(geometry.coordinates) ? geometry.coordinates : [];
+  if (geometry?.type === 'MultiPolygon') return Array.isArray(geometry.coordinates) ? geometry.coordinates.flat() : [];
+  return [];
 }
+
+function closestPointOnSegment(point, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const denom = dx * dx + dy * dy;
+  const t = denom ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / denom)) : 0;
+  return [a[0] + t * dx, a[1] + t * dy];
+}
+
+function buildParcelView(geometry, geocodeCoordinates) {
+  const rings = parcelGeometryRings(geometry)
+    .map((ring) => (Array.isArray(ring) ? ring.filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1])) : []))
+    .filter((ring) => ring.length >= 3);
+  if (!rings.length) return { path:'', point:null, nearest:null, vertexCount:0, partCount:0, ringCount:0, simplified:false };
+
+  let minLon=Infinity, maxLon=-Infinity, minLat=Infinity, maxLat=-Infinity, vertexCount=0;
+  for (const ring of rings) for (const [lon,lat] of ring) {
+    vertexCount += 1;
+    if (lon < minLon) minLon = lon; if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+  }
+  const geocode = Number.isFinite(geocodeCoordinates?.longitude) && Number.isFinite(geocodeCoordinates?.latitude)
+    ? [geocodeCoordinates.longitude, geocodeCoordinates.latitude] : null;
+  if (geocode) {
+    minLon=Math.min(minLon,geocode[0]); maxLon=Math.max(maxLon,geocode[0]);
+    minLat=Math.min(minLat,geocode[1]); maxLat=Math.max(maxLat,geocode[1]);
+  }
+
+  const midLat = (minLat + maxLat) / 2;
+  const lonScale = Math.max(Math.cos(midLat * Math.PI / 180), 0.01);
+  const project = ([lon,lat]) => [lon * lonScale, lat];
+  const projectedRings = rings.map((ring) => ring.map(project));
+  const projectedPoint = geocode ? project(geocode) : null;
+
+  let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+  for (const ring of projectedRings) for (const [x,y] of ring) {
+    if (x < minX) minX=x; if (x > maxX) maxX=x; if (y < minY) minY=y; if (y > maxY) maxY=y;
+  }
+  if (projectedPoint) {
+    minX=Math.min(minX,projectedPoint[0]); maxX=Math.max(maxX,projectedPoint[0]);
+    minY=Math.min(minY,projectedPoint[1]); maxY=Math.max(maxY,projectedPoint[1]);
+  }
+
+  const vw=760, vh=320, pad=34;
+  const spanX=Math.max(maxX-minX,1e-10), spanY=Math.max(maxY-minY,1e-10);
+  const scale=Math.min((vw-pad*2)/spanX,(vh-pad*2)/spanY);
+  const usedW=spanX*scale, usedH=spanY*scale;
+  const offsetX=(vw-usedW)/2, offsetY=(vh-usedH)/2;
+  const toSvg=([x,y]) => [offsetX+(x-minX)*scale, vh-(offsetY+(y-minY)*scale)];
+
+  const totalBudget=6000;
+  const perRing=Math.max(80,Math.floor(totalBudget/Math.max(rings.length,1)));
+  let simplified=false;
+  const path=projectedRings.map((ring) => {
+    const step=Math.max(1,Math.ceil(ring.length/perRing));
+    if (step > 1) simplified=true;
+    const sampled=[];
+    for (let i=0;i<ring.length;i+=step) sampled.push(ring[i]);
+    if (sampled[sampled.length-1] !== ring[ring.length-1]) sampled.push(ring[ring.length-1]);
+    return sampled.map((p,i) => {
+      const [x,y]=toSvg(p);
+      return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ')+' Z';
+  }).join(' ');
+
+  let nearestProjected=null, nearestSq=Infinity;
+  if (projectedPoint) {
+    for (const ring of projectedRings) {
+      for (let i=1;i<ring.length;i++) {
+        const candidate=closestPointOnSegment(projectedPoint,ring[i-1],ring[i]);
+        const dx=projectedPoint[0]-candidate[0], dy=projectedPoint[1]-candidate[1];
+        const d=dx*dx+dy*dy;
+        if (d < nearestSq) { nearestSq=d; nearestProjected=candidate; }
+      }
+    }
+  }
+
+  const partCount = geometry?.type === 'MultiPolygon' ? geometry.coordinates.length : 1;
+  return {
+    path,
+    point:projectedPoint ? toSvg(projectedPoint) : null,
+    nearest:nearestProjected ? toSvg(nearestProjected) : null,
+    vertexCount,
+    partCount,
+    ringCount:rings.length,
+    simplified
+  };
+}
+
+function parcelMatchLabel(parcel) {
+  switch (parcel?.resolutionMethod) {
+    case 'exact-point': return 'Address point inside parcel';
+    case 'exact-point-address-match': return 'Overlapping parcels resolved by address';
+    case 'address-match': return 'Nearby parcel resolved by address';
+    case 'nearest-geometry': return 'Nearest parcel geometry';
+    case 'single-nearby': return 'Only nearby parcel candidate';
+    default: return parcel ? 'Parcel located' : 'Parcel not found';
+  }
+}
+
+function exportBaseName(packet) {
+  const raw = packet?.geocode?.matchedAddress || packet?.inputAddress || 'property-research';
+  const slug = String(raw).normalize('NFKD').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 72);
+  return slug || 'property-research';
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const area = document.createElement('textarea');
+  area.value = text; area.setAttribute('readonly', ''); area.style.position='fixed'; area.style.opacity='0';
+  document.body.appendChild(area); area.select();
+  try { document.execCommand('copy'); } finally { area.remove(); }
+}
+
 
 function download(filename, content, type) {
   const blob = new Blob([content], { type });
@@ -114,7 +218,9 @@ function render(packet, markdown = '', runId = null) {
   $('#metric-missing').textContent = assessment.missing?.length ? `Missing: ${assessment.missing.join(', ')}` : 'Core source categories located';
 
   const parcel = packet.parcel;
-  $('#metric-parcel').textContent = parcel ? 'Located' : 'Not found';
+  const match = parcel?.matchEvidence || null;
+  const needsParcelReview = Boolean(parcel && (match?.status === 'review' || parcel.resolutionMethod !== 'exact-point'));
+  $('#metric-parcel').textContent = parcel ? (needsParcelReview ? 'Review match' : 'Located') : 'Not found';
   $('#metric-parcel-source').textContent = parcel ? (parcel.layerName || hostOf(parcel.sourceUrl)) : 'No intersecting parcel returned';
   const zoneCount = (packet.zoning || []).reduce((n,z) => n + (z.features?.length || 0), 0);
   $('#metric-zoning').textContent = zoneCount ? `${zoneCount} feature${zoneCount === 1 ? '' : 's'}` : 'Not found';
@@ -123,20 +229,69 @@ function render(packet, markdown = '', runId = null) {
   $('#metric-warnings').textContent = String(packet.warnings?.length || 0);
 
   const parcelStatus = $('#parcel-status');
-  parcelStatus.textContent = parcel ? 'Located' : 'Not found';
-  parcelStatus.className = `status-chip${parcel ? '' : ' missing'}`;
+  parcelStatus.textContent = parcel ? (needsParcelReview ? 'Review match' : 'Located') : 'Not found';
+  parcelStatus.className = `status-chip${parcel ? (needsParcelReview ? ' warning' : '') : ' missing'}`;
   const preview = $('#parcel-preview');
-  const path = svgParcelPath(parcel?.geometry);
-  $('#parcel-shape').setAttribute('d', path);
-  preview.classList.toggle('empty', !path);
-  $('#parcel-preview-label').textContent = path ? 'Reference parcel geometry · WGS 84' : 'No parcel geometry returned';
+  const view = buildParcelView(parcel?.geometry, packet.geocode?.coordinates);
+  $('#parcel-shape').setAttribute('d', view.path);
+  preview.classList.toggle('empty', !view.path);
+  const pointEl=$('#parcel-geocode-point');
+  const haloEl=$('#parcel-geocode-halo');
+  const lineEl=$('#parcel-distance-line');
+  const nearestEl=$('#parcel-nearest-point');
+  const showPoint=Boolean(view.point);
+  for (const el of [pointEl,haloEl]) el.classList.toggle('hidden',!showPoint);
+  if (showPoint) {
+    for (const el of [pointEl,haloEl]) { el.setAttribute('cx',view.point[0].toFixed(1)); el.setAttribute('cy',view.point[1].toFixed(1)); }
+  }
+  const showDistance=Boolean(view.point && view.nearest && match?.insideParcel === false);
+  lineEl.classList.toggle('hidden',!showDistance); nearestEl.classList.toggle('hidden',!showDistance);
+  if (showDistance) {
+    lineEl.setAttribute('x1',view.point[0].toFixed(1)); lineEl.setAttribute('y1',view.point[1].toFixed(1));
+    lineEl.setAttribute('x2',view.nearest[0].toFixed(1)); lineEl.setAttribute('y2',view.nearest[1].toFixed(1));
+    nearestEl.setAttribute('cx',view.nearest[0].toFixed(1)); nearestEl.setAttribute('cy',view.nearest[1].toFixed(1));
+  }
+  $('#parcel-preview-label').textContent = view.path
+    ? `GIS parcel geometry · World Geodetic System 1984 (WGS 84)${view.simplified ? ' · visually simplified' : ''}`
+    : 'No parcel geometry returned';
+
+  const matchPanel=$('#parcel-match-panel');
+  matchPanel.classList.toggle('hidden',!parcel);
+  matchPanel.classList.toggle('review',needsParcelReview);
+  if (parcel) {
+    $('#parcel-match-title').textContent = needsParcelReview ? 'Parcel match requires review' : 'Parcel matched directly';
+    const methodLabel=parcelMatchLabel(parcel);
+    const methodDetail = parcel.resolutionMethod === 'address-match'
+      ? 'The Census address point was outside parcel polygons, so source address fields were used to select the best nearby parcel.'
+      : parcel.resolutionMethod === 'nearest-geometry'
+        ? 'The Census address point was outside parcel polygons, so the nearest clearly separated parcel geometry was selected.'
+        : parcel.resolutionMethod === 'single-nearby'
+          ? 'The Census address point was outside parcel polygons, and only one parcel was returned within the nearby search radius.'
+          : parcel.resolutionMethod === 'exact-point-address-match'
+            ? 'More than one parcel polygon intersected the Census point; source address fields were used to choose between them.'
+            : 'The Census address point falls inside a single parcel polygon returned by the parcel source.';
+    $('#parcel-match-detail').textContent = `${methodLabel}. ${methodDetail}${needsParcelReview ? ' Verify the parcel identifier/address and source record before relying on downstream zoning.' : ''}`;
+    $('#parcel-match-quality').textContent = needsParcelReview ? 'Review' : 'High';
+    $('#parcel-match-distance').textContent = match?.insideParcel === true
+      ? 'Inside parcel polygon'
+      : Number.isFinite(match?.distanceMeters) ? `Approx. ${match.distanceMeters.toFixed(1)} m to boundary` : 'Not measured';
+    $('#parcel-match-candidates').textContent = Number.isFinite(match?.candidateCount) ? String(match.candidateCount) : 'Not reported';
+    const c=packet.geocode?.coordinates;
+    $('#parcel-geocode-coordinates').textContent = Number.isFinite(c?.latitude) && Number.isFinite(c?.longitude)
+      ? `${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}` : 'Not available';
+    const polygons=view.partCount || 0;
+    $('#parcel-geometry-summary').textContent = view.path
+      ? `${polygons} polygon${polygons===1?'':'s'} · ${view.ringCount} ring${view.ringCount===1?'':'s'} · ${view.vertexCount.toLocaleString()} vertices`
+      : 'No geometry';
+    $('#parcel-layer-summary').textContent = parcel.layerName ? `${parcel.layerName} (layer ${safeText(parcel.layerId,'?')})` : safeText(parcel.layerId,'Not reported');
+  }
 
   const fields = $('#parcel-fields'); fields.innerHTML = '';
   if (parcel) {
     for (const [key,value] of likelyFieldEntries(parcel.properties)) {
       const div = document.createElement('div');
       const dt = document.createElement('dt'); const dd = document.createElement('dd');
-      dt.textContent = key; dd.textContent = safeText(value); div.append(dt,dd); fields.append(div);
+      dt.textContent = key; dt.title=`Source field: ${key}`; dd.textContent = safeText(value); div.append(dt,dd); fields.append(div);
     }
   }
   const parcelSourceLink = $('#parcel-source-link');

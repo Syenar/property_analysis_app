@@ -74,7 +74,11 @@ test('engine resolves a street-centerline geocode through nearby parcel address 
   const { packet } = await engine.run('4600 Silver Hill Rd, Washington, DC', { fetchOrdinanceDocuments:false });
   assert.equal(packet.parcel.properties.SITUS_ADDRESS, '4600 SILVER HILL RD');
   assert.equal(packet.parcel.resolutionMethod, 'address-match');
-  assert.ok(packet.warnings.some((w) => /nearby address matching/i.test(w)));
+  assert.equal(packet.parcel.matchEvidence.status, 'review');
+  assert.equal(packet.parcel.matchEvidence.insideParcel, false);
+  assert.equal(packet.parcel.matchEvidence.candidateCount, 2);
+  assert.ok(Number.isFinite(packet.parcel.matchEvidence.distanceMeters));
+  assert.ok(packet.warnings.some((w) => /parcel match requires review/i.test(w)));
 });
 
 test('engine reconstructs split assessor address fields for nearby parcel matching', async () => {

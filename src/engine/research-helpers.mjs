@@ -70,30 +70,45 @@ function featureDistanceMeters(feature, coordinates) {
   return best;
 }
 
-export function chooseNearbyParcel(features, inputAddress, coordinates = null) {
-  if (!features?.length) return { feature:null, reason:'none' };
-  if (features.length === 1) return { feature:features[0], reason:'single-nearby' };
+export function chooseNearbyParcel(features, inputAddress, coordinates = null, { allowNearest = true } = {}) {
+  if (!features?.length) return { feature:null, reason:'none', candidateCount:0 };
   const ranked = features.map((feature) => ({
     feature,
     score:parcelAddressScore(feature, inputAddress),
     distance:featureDistanceMeters(feature, coordinates)
   })).sort((a,b) => (b.score - a.score) || (a.distance - b.distance));
-  if (ranked[0].score >= 5 && ranked[0].score >= (ranked[1]?.score || 0) + 2) {
-    return { feature:ranked[0].feature, reason:'address-match', score:ranked[0].score };
-  }
   const nearest = [...ranked].sort((a,b) => a.distance - b.distance);
-  if (Number.isFinite(nearest[0].distance) && nearest[0].distance <= 30) {
+  const evidence = (selected) => ({
+    candidateCount:ranked.length,
+    distanceMeters:Number.isFinite(selected?.distance) ? selected.distance : null,
+    addressScore:selected?.score || 0,
+    runnerUpAddressScore:ranked[1]?.score ?? null,
+    nearestAlternativeMeters:(() => {
+      const alternate = nearest.find((row) => row.feature !== selected?.feature);
+      return Number.isFinite(alternate?.distance) ? alternate.distance : null;
+    })()
+  });
+  if (features.length === 1) {
+    return { feature:ranked[0].feature, reason:'single-nearby', ...evidence(ranked[0]) };
+  }
+  if (ranked[0].score >= 5 && ranked[0].score >= (ranked[1]?.score || 0) + 2) {
+    return { feature:ranked[0].feature, reason:'address-match', score:ranked[0].score, ...evidence(ranked[0]) };
+  }
+  if (allowNearest && Number.isFinite(nearest[0].distance) && nearest[0].distance <= 30) {
     const second = nearest[1]?.distance ?? Infinity;
     if (second - nearest[0].distance >= 4 || second >= nearest[0].distance * 1.7) {
-      return { feature:nearest[0].feature, reason:'nearest-geometry', distanceMeters:nearest[0].distance };
+      return { feature:nearest[0].feature, reason:'nearest-geometry', ...evidence(nearest[0]) };
     }
   }
   return {
     feature:null,
     reason:'ambiguous',
+    candidateCount:features.length,
     count:features.length,
     bestAddressScore:ranked[0]?.score || 0,
-    nearestMeters:Number.isFinite(nearest[0]?.distance) ? nearest[0].distance : null
+    runnerUpAddressScore:ranked[1]?.score ?? null,
+    nearestMeters:Number.isFinite(nearest[0]?.distance) ? nearest[0].distance : null,
+    nearestAlternativeMeters:Number.isFinite(nearest[1]?.distance) ? nearest[1].distance : null
   };
 }
 

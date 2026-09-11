@@ -12,23 +12,65 @@ export async function findParcel({ engine, address, geocode, candidates, maxCand
       for (const rank of ranked.slice(0, 4)) {
         if (rank.score < 28) continue;
         const result = await adapter.queryPoint(candidate.url, rank.layer.id, geocode.coordinates);
-        let feature = result?.features?.[0] || null;
-        let resolutionMethod = feature ? 'exact-point' : null;
-        if (!feature && adapter === engine.arcgis && typeof adapter.queryNearby === 'function') {
+        const pointFeatures = result?.features || [];
+        let feature = null;
+        let resolutionMethod = null;
+        let matchEvidence = null;
+        if (pointFeatures.length === 1) {
+          feature = pointFeatures[0];
+          resolutionMethod = 'exact-point';
+          matchEvidence = {
+            status:'high', insideParcel:true, candidateCount:1, distanceMeters:0,
+            addressScore:null, runnerUpAddressScore:null, nearestAlternativeMeters:null,
+            searchRadiusMeters:0
+          };
+        } else if (pointFeatures.length > 1) {
+          const selected = chooseNearbyParcel(pointFeatures, address, geocode.coordinates, { allowNearest:false });
+          feature = selected.feature;
+          if (feature) {
+            resolutionMethod = 'exact-point-address-match';
+            matchEvidence = {
+              status:'review', insideParcel:true, candidateCount:selected.candidateCount,
+              distanceMeters:0, addressScore:selected.addressScore ?? selected.score ?? null,
+              runnerUpAddressScore:selected.runnerUpAddressScore ?? null,
+              nearestAlternativeMeters:selected.nearestAlternativeMeters ?? null,
+              searchRadiusMeters:0
+            };
+            warnings.push(`Parcel match requires review: ${selected.candidateCount} parcel polygons intersect the Census address point. The parcel whose source address fields best matched the input address was selected. Verify the parcel identifier and source record before relying on zoning results.`);
+          } else {
+            warnings.push(`Parcel point lookup is ambiguous: ${selected.candidateCount || pointFeatures.length} parcel polygons intersect the Census address point and the source attributes did not identify one parcel confidently: ${candidate.url}/${rank.layer.id}`);
+          }
+        }
+        if (!feature && pointFeatures.length === 0 && adapter === engine.arcgis && typeof adapter.queryNearby === 'function') {
           const nearby = await adapter.queryNearby(candidate.url, rank.layer.id, geocode.coordinates, { meters:45 });
           const selected = chooseNearbyParcel(nearby?.features || [], address, geocode.coordinates);
           feature = selected.feature;
           resolutionMethod = feature ? selected.reason : null;
-          if (!feature && selected.reason === 'ambiguous') {
-            const nearest = selected.nearestMeters == null ? 'unknown' : `${selected.nearestMeters.toFixed(1)}m`;
-            warnings.push(`Nearby parcel lookup returned ${selected.count} candidates and could not match the input address confidently (best address score ${selected.bestAddressScore || 0}, nearest ${nearest}): ${candidate.url}/${rank.layer.id}`);
+          if (feature) {
+            matchEvidence = {
+              status:'review', insideParcel:false, candidateCount:selected.candidateCount || 1,
+              distanceMeters:selected.distanceMeters ?? null,
+              addressScore:selected.addressScore ?? selected.score ?? null,
+              runnerUpAddressScore:selected.runnerUpAddressScore ?? null,
+              nearestAlternativeMeters:selected.nearestAlternativeMeters ?? null,
+              searchRadiusMeters:45
+            };
+          } else if (selected.reason === 'ambiguous') {
+            const nearest = selected.nearestMeters == null ? 'unknown' : `${selected.nearestMeters.toFixed(1)} m`;
+            warnings.push(`Nearby parcel lookup returned ${selected.candidateCount || selected.count} candidates and could not match the input address confidently (best address score ${selected.bestAddressScore || 0}, nearest boundary ${nearest}): ${candidate.url}/${rank.layer.id}`);
           }
         }
         if (!feature) continue;
-        if (resolutionMethod !== 'exact-point') {
-          const label = resolutionMethod === 'address-match' ? 'nearby address matching'
-            : resolutionMethod === 'nearest-geometry' ? 'nearest parcel geometry' : 'a nearby search';
-          warnings.push(`Parcel resolved using ${label} because the Census geocode did not fall inside a parcel polygon.`);
+        if (matchEvidence && matchEvidence.insideParcel === false) {
+          const distance = Number.isFinite(matchEvidence.distanceMeters) ? `${matchEvidence.distanceMeters.toFixed(1)} m` : 'an unknown distance';
+          const count = matchEvidence.candidateCount || 1;
+          if (resolutionMethod === 'address-match') {
+            warnings.push(`Parcel match requires review: the Census address point did not fall inside a parcel polygon. The parcel whose source address fields best matched the input was selected from ${count} nearby candidate${count === 1 ? '' : 's'}; the point is approximately ${distance} from the selected parcel boundary. Verify the parcel identifier/address before relying on zoning or property results.`);
+          } else if (resolutionMethod === 'nearest-geometry') {
+            warnings.push(`Parcel match requires review: the Census address point did not fall inside a parcel polygon. The nearest parcel was selected from ${count} nearby candidates; the point is approximately ${distance} from the selected parcel boundary. Verify the parcel identifier/address before relying on zoning or property results.`);
+          } else {
+            warnings.push(`Parcel match requires review: the Census address point did not fall inside a parcel polygon. The only nearby parcel candidate was selected; the point is approximately ${distance} from the parcel boundary. Verify the parcel identifier/address before relying on zoning or property results.`);
+          }
         }
         const geometry = esriGeometryToGeoJSON(featureGeom(feature));
         const parcel = {
@@ -44,6 +86,7 @@ export async function findParcel({ engine, address, geocode, candidates, maxCand
           esriGeometry:featureGeom(feature)?.rings ? featureGeom(feature) : geoJSONToEsriGeometry(geometry),
           rawFeature:feature,
           resolutionMethod:resolutionMethod || 'exact-point',
+          matchEvidence,
           sourceLimitations:inspection.sourceLimitations || [],
           sourceFreshness:candidate.freshness || null
         };

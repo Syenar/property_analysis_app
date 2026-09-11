@@ -107,7 +107,31 @@
           <section class="two-column">
             <article class="card">
               <div class="card-heading"><div><span class="section-kicker">PROPERTY</span><h3>Parcel record</h3></div><span id="parcel-status" class="status-chip"></span></div>
-              <div id="parcel-preview" class="parcel-preview empty"><svg viewBox="0 0 420 190" preserveAspectRatio="none"><path id="parcel-shape" d=""/></svg><div class="map-crosshair"></div><span id="parcel-preview-label">No geometry yet</span></div>
+              <div id="parcel-preview" class="parcel-preview empty">
+                <svg id="parcel-map" viewBox="0 0 760 320" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Parcel boundary and Census address point">
+                  <path id="parcel-shape" d="" fill-rule="evenodd"/>
+                  <line id="parcel-distance-line" class="parcel-distance-line hidden" x1="0" y1="0" x2="0" y2="0"/>
+                  <circle id="parcel-nearest-point" class="parcel-nearest-point hidden" cx="0" cy="0" r="4"/>
+                  <circle id="parcel-geocode-halo" class="parcel-geocode-halo hidden" cx="0" cy="0" r="11"/>
+                  <circle id="parcel-geocode-point" class="parcel-geocode-point hidden" cx="0" cy="0" r="5"/>
+                </svg>
+                <div class="parcel-view-legend" aria-hidden="true"><span><i class="legend-parcel"></i>Parcel boundary</span><span><i class="legend-point"></i>Census address point</span></div>
+                <span id="parcel-preview-label">No geometry yet</span>
+              </div>
+              <div id="parcel-match-panel" class="parcel-match-panel hidden">
+                <div class="parcel-match-copy">
+                  <strong id="parcel-match-title"></strong>
+                  <span id="parcel-match-detail"></span>
+                </div>
+                <dl class="parcel-match-grid">
+                  <div><dt>Match quality</dt><dd id="parcel-match-quality">—</dd></div>
+                  <div><dt>Point to parcel</dt><dd id="parcel-match-distance">—</dd></div>
+                  <div><dt>Nearby candidates</dt><dd id="parcel-match-candidates">—</dd></div>
+                  <div><dt>Census point</dt><dd id="parcel-geocode-coordinates">—</dd></div>
+                  <div><dt>Geometry</dt><dd id="parcel-geometry-summary">—</dd></div>
+                  <div><dt>GIS layer</dt><dd id="parcel-layer-summary">—</dd></div>
+                </dl>
+              </div>
               <dl id="parcel-fields" class="data-list"></dl>
               <a id="parcel-source-link" class="source-link hidden" target="_blank" rel="noopener noreferrer">Open parcel source <span>↗</span></a>
             </article>
