@@ -26,20 +26,16 @@ jobs:
           node scripts/patch-preview-app-render.mjs
           node scripts/patch-preview-engine.mjs
           node scripts/patch-preview-tests.mjs
+      - name: Apply blueprint and building-plan discovery update
+        shell: bash
+        run: |
+          cat _blueprint_patch/p00.b64 _blueprint_patch/p01.b64 _blueprint_patch/p02.b64 _blueprint_patch/p03.b64 _blueprint_patch/p04.b64 | base64 -d > /tmp/patch-preview-blueprints.mjs
+          echo '9f93d27a65d83c0257d19e4a00aa03146fe311f77f32cdf741a8399629f0f9e  /tmp/patch-preview-blueprints.mjs' | sha256sum -c -
+          node /tmp/patch-preview-blueprints.mjs
       - name: Verify updated preview source
         run: |
           npm test
           npm run check
-      - name: Persist parcel update on preview branch
-        shell: bash
-        run: |
-          if ! git diff --quiet -- web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs tests/engine.test.mjs; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add web/index.html web/styles.css web/app.js src/engine/research-helpers.mjs src/engine/parcel-stage.mjs tests/engine.test.mjs
-            git commit -m "Improve parcel match evidence and viewer accuracy"
-            git push origin HEAD:temp-cloudflare-preview
-          fi
       - name: Deploy temporary Worker and static assets
         shell: bash
         run: |
@@ -78,13 +74,13 @@ jobs:
           cat /tmp/health.json
 
           set +e
-          timeout 25s curl --silent --show-error --no-buffer \
+          timeout 30s curl --silent --show-error --no-buffer \
             -H 'content-type: application/json' \
-            --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"maxGisCandidates":1,"maxOrdinanceDocuments":1}' \
+            --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxOrdinanceDocuments":1,"maxBlueprintDocuments":1}' \
             "$url/api/research/stream" > /tmp/research.ndjson
           research_status=$?
           set -e
-          head -n 20 /tmp/research.ndjson || true
+          head -n 25 /tmp/research.ndjson || true
           if grep -Fqi 'Illegal invocation' /tmp/research.ndjson; then
             echo 'Cloudflare illegal-invocation regression detected.' >&2
             exit 1
@@ -97,4 +93,8 @@ jobs:
             echo "Research stream did not produce NDJSON (curl status $research_status)." >&2
             exit 1
           fi
-          echo 'Live Cloudflare research smoke check passed.'
+          if ! grep -q '"stage":"plans"' /tmp/research.ndjson; then
+            echo 'Blueprint/plan research stage was not present in the live stream.' >&2
+            exit 1
+          fi
+          echo 'Live Cloudflare research + blueprint-stage smoke check passed.'
