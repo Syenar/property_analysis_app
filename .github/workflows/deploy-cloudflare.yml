@@ -68,6 +68,37 @@ jobs:
             exit "$patch_status"
           fi
           rm -f blueprint-patch-error.log
+          cat > src/core/abort.mjs <<'EOF'
+          export function createAbortError(message = 'The operation was aborted') {
+            const error = new Error(message);
+            error.name = 'AbortError';
+            error.code = 'ABORT_ERR';
+            return error;
+          }
+          export function isAbortError(error) {
+            return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+          }
+          export function abortReason(signal, fallbackMessage = 'The operation was aborted') {
+            if (!signal?.aborted) return null;
+            if (signal.reason instanceof Error) return signal.reason;
+            return createAbortError(typeof signal.reason === 'string' && signal.reason.trim() ? signal.reason : fallbackMessage);
+          }
+          export function throwIfAborted(signal) {
+            if (signal?.aborted) throw abortReason(signal);
+          }
+          export function rethrowIfAborted(error, signal) {
+            if (signal?.aborted) throw abortReason(signal) || error;
+            if (isAbortError(error)) throw error;
+          }
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/api-input.test.mjs')
+          s=p.read_text()
+          s=s.replace("maxGisCandidates:999, maxOrdinanceDocuments:-4, fetchOrdinanceDocuments:true", "maxGisCandidates:999, maxOrdinanceDocuments:-4, maxBlueprintDocuments:99, fetchOrdinanceDocuments:true")
+          s=s.replace("address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, fetchOrdinanceDocuments:true", "address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, maxBlueprintDocuments:10, fetchOrdinanceDocuments:true, fetchBlueprintDocuments:true")
+          p.write_text(s)
+          PY
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
