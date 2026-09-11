@@ -1,0 +1,106 @@
+function normalizeState(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const PROVIDERS = Object.freeze([
+  Object.freeze({
+    id:'arizona-memory-project',
+    name:'Arizona Memory Project',
+    states:['Arizona','AZ','04'],
+    host:'azmemory.azlibrary.gov',
+    catalogUrl:'https://azmemory.azlibrary.gov/',
+    searchUrl:'https://azmemory.azlibrary.gov/nodes/search',
+    authority:'Arizona State Library, Archives and Public Records',
+    sourceType:'state-digital-archive',
+    searchMethod:'harvested-catalog',
+    directAutomation:'browser-challenge',
+    limitation:'Arizona Memory currently presents a browser challenge to direct server-side catalog and record requests. Its public metadata is also harvested into the State of Arizona Research Library catalog, which the application can search deterministically; source files remain link-only when Arizona Memory blocks retrieval.',
+    harvestedCatalog:Object.freeze({
+      type:'iii-vega',
+      name:'State of Arizona Research Library catalog',
+      catalogUrl:'https://asli.na5.iiivega.com/',
+      endpoint:'https://na5.iiivega.com/api/search-result/search/format-groups',
+      customerDomain:'asli.na5.iiivega.com',
+      pageSize:30
+    }),
+    planTerms:['architectural drawings','architect plan','blueprint','building plans','floor plan','elevation','site plan']
+  })
+]);
+
+const SUPPORTED_CATALOG_TYPES = new Set(['iii-vega','contentdm','omeka-s']);
+
+function asStringArray(value) {
+  return Array.isArray(value) ? value.map((x) => String(x || '').trim()).filter(Boolean) : [];
+}
+
+export function validateArchiveProvider(provider, { index = null } = {}) {
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) throw new Error(`Archive provider${index == null ? '' : ` ${index}`} must be an object`);
+  const id = String(provider.id || '').trim();
+  const name = String(provider.name || '').trim();
+  const states = asStringArray(provider.states);
+  if (!id) throw new Error(`Archive provider${index == null ? '' : ` ${index}`} requires id`);
+  if (!name) throw new Error(`Archive provider ${id} requires name`);
+  if (!states.length) throw new Error(`Archive provider ${id} requires at least one state selector`);
+  const harvestedCatalog = provider.harvestedCatalog || null;
+  if (harvestedCatalog) {
+    const type = String(harvestedCatalog.type || '').trim().toLowerCase();
+    if (!SUPPORTED_CATALOG_TYPES.has(type)) throw new Error(`Archive provider ${id} uses unsupported harvestedCatalog.type: ${type || '(missing)'}`);
+    if (type === 'iii-vega' && !harvestedCatalog.endpoint) throw new Error(`Archive provider ${id} III Vega catalog requires endpoint`);
+    if (type === 'contentdm' && !harvestedCatalog.apiBase) throw new Error(`Archive provider ${id} CONTENTdm catalog requires apiBase`);
+    if (type === 'contentdm' && !asStringArray(harvestedCatalog.collections).length) throw new Error(`Archive provider ${id} CONTENTdm catalog requires collections`);
+    if (type === 'omeka-s' && !harvestedCatalog.apiBase) throw new Error(`Archive provider ${id} Omeka S catalog requires apiBase`);
+  }
+  return {
+    ...provider,
+    id,
+    name,
+    states,
+    host:String(provider.host || '').trim() || null,
+    catalogUrl:String(provider.catalogUrl || harvestedCatalog?.catalogUrl || '').trim() || null,
+    searchUrl:String(provider.searchUrl || '').trim() || null,
+    planTerms:asStringArray(provider.planTerms).length ? asStringArray(provider.planTerms) : ['architectural drawings','architect plan','blueprint','building plans','floor plan'],
+    harvestedCatalog: harvestedCatalog ? { ...harvestedCatalog, type:String(harvestedCatalog.type).trim().toLowerCase() } : null
+  };
+}
+
+export function normalizeArchiveProviders(rows = []) {
+  if (!Array.isArray(rows)) throw new Error('Archive provider configuration must be an array');
+  const deduped = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const provider = validateArchiveProvider(rows[i], { index:i });
+    deduped.set(provider.id, provider);
+  }
+  return [...deduped.values()];
+}
+
+export function applicableArchiveProviders(jurisdiction = {}, extraProviders = []) {
+  const values = [jurisdiction.state, jurisdiction.stateCode, jurisdiction.stateAbbreviation, jurisdiction.statePostal]
+    .map(normalizeState).filter(Boolean);
+  if (!values.length) return [];
+  const merged = new Map();
+  for (const provider of [...PROVIDERS, ...normalizeArchiveProviders(extraProviders)]) merged.set(provider.id, provider);
+  return [...merged.values()].filter((provider) => provider.states.some((state) => values.includes(normalizeState(state))));
+}
+
+export function archiveProviderSearchQueries(provider, { address, aliases = [] } = {}) {
+  const terms = [address, ...(aliases || []).map((row) => row?.value || row)].map((x) => String(x || '').trim()).filter(Boolean);
+  const seen = new Set();
+  const queries = [];
+  for (const term of terms.slice(0, 5)) {
+    for (const planTerm of (provider.planTerms || ['architectural drawings']).slice(0, 4)) {
+      const query = provider.host ? `site:${provider.host} "${term.replaceAll('"','')}" "${planTerm}"` : `"${term.replaceAll('"','')}" "${planTerm}"`;
+      if (!seen.has(query)) { seen.add(query); queries.push(query); }
+    }
+  }
+  return queries.slice(0, 12);
+}
+
+export function archiveProviderStatus(provider, { searchAvailable = false, harvestedSearchAttempted = false, harvestedSearchSucceeded = false, harvestedSearchError = null } = {}) {
+  const indexedWeb = Boolean(searchAvailable);
+  const harvested = Boolean(harvestedSearchSucceeded);
+  const searched = indexedWeb || harvested;
+  const harvestConfigured = Boolean(provider.harvestedCatalog);
+  let searchMethod = provider.searchMethod;
+  if (harvested) searchMethod = `${provider.harvestedCatalog.type}-harvested-catalog`;
+  else if (indexedWeb) searchMethod = 'indexed-web-search';
+  else if (harvestConfigured) searchMethod = `${provider.harvestedCatalog.type}-harvested-c
