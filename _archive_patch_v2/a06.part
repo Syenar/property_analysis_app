@@ -1,0 +1,95 @@
+value)].filter(Boolean);
+      const queries = [];
+      for (const term of terms.slice(0, 5)) {
+        queries.push(
+          `"${term}" ("architectural drawings" OR blueprint OR "building plans" OR "floor plan" OR elevation)`,
+          `"${term}" (archive OR library OR "digital collection") ("architectural drawings" OR "architect plan")`
+        );
+      }
+      queries.push(`"${address}" site:loc.gov architectural drawings`, `"${address}" site:nps.gov architectural drawings`);
+      for (const provider of archiveProviders) queries.push(...archiveProviderSearchQueries(provider, { address, aliases }));
+      const seenQueries = new Set();
+      for (const query of queries.slice(0, this.maxSearchQueries)) {
+        if (seenQueries.has(query)) continue;
+        seenQueries.add(query);
+        throwIfAborted(signal);
+        try {
+          const found = await this.webSearch.search(query, { count:10, signal });
+          rawResults.push(...found.map((r) => ({ ...r, discoveryScope:'extra', discoveryQuery:query, queryScoped:true })));
+        } catch (error) { rethrowIfAborted(error, signal); }
+      }
+    }
+
+    const initial = [];
+    for (const result of rawResults) {
+      const classified = classifyResult(result, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:looksLikeCatalog(result.url, `${result.title || ''} ${result.description || ''}`) ? 'archive-web-search' : 'web-plan-search' });
+      if (classified) initial.push(classified);
+    }
+
+    const locSources = await this.searchLibraryOfCongress(jurisdiction, { address, aliases, ids, signal });
+    const sources = [...initial, ...providerSources, ...locSources];
+    const inspectTargets = dedupeSources(initial.filter((r) => r.catalogRecord && !r.directDocument)).slice(0, this.maxRecordInspections);
+    const records = [];
+    const assets = [];
+    for (const result of inspectTargets) {
+      const inspected = await this.inspectRecord(result, { jurisdiction, address, aliases, ids, signal });
+      if (!inspected) continue;
+      if (inspected.record) records.push(inspected.record);
+      else records.push(inspected);
+      if (inspected.assets) assets.push(...inspected.assets);
+    }
+
+    const strongRecords = dedupeSources([...records, ...initial.filter((r) => r.catalogRecord)]).filter((r) => (r.confidence || 0) >= 55).slice(0, this.maxRelatedSearches);
+    const related = [];
+    if (webSearchAvailable) {
+      for (const record of strongRecords) {
+        const title = cleanedTitle(record.title);
+        let host;
+        try { host = new URL(record.url).hostname; } catch { continue; }
+        if (!title || title.length < 8) continue;
+        const query = `"${title}" site:${host}`;
+        let found = [];
+        try { found = await this.webSearch.search(query, { count:15, signal }); }
+        catch (error) { rethrowIfAborted(error, signal); continue; }
+        for (const result of found) {
+          const sameTitle = normalize(cleanedTitle(result.title)) === normalize(title);
+          const classified = classifyResult({ ...result, discoveryScope:'extra', discoveryQuery:query, queryScoped:true, relatedTo:record.url }, {
+            jurisdiction, address, aliases:[...aliases, { value:title, source:record.url, confidence:95 }], ids, policy:this.policy,
+            discoverySource:'archive-related-record', catalogRecord:looksLikeCatalog(result.url, `${result.title || ''} ${result.description || ''}`)
+          });
+          if (classified && (sameTitle || classified.matchEvidence?.propertyAliasMatch)) related.push(classified);
+        }
+      }
+    }
+
+    const combined = dedupeSources([...sources, ...records, ...assets, ...related]);
+    const catalogTitleGroups = new Map();
+    for (const source of combined.filter((row) => row.catalogRecord)) {
+      const key = normalize(cleanedTitle(source.title));
+      if (!key) continue;
+      catalogTitleGroups.set(key, (catalogTitleGroups.get(key) || 0) + 1);
+    }
+    const siblingCatalogCount = [...catalogTitleGroups.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+    const relatedRecordCount = Math.max(combined.filter((s) => s.discoverySource === 'archive-related-record').length, siblingCatalogCount);
+    return {
+      attempted:true,
+      webSearchAvailable,
+      aliases,
+      sources:combined,
+      archiveCatalogCount:combined.filter((s) => s.catalogRecord).length,
+      archiveAssetCount:combined.filter((s) => s.discoverySource === 'archive-catalog-asset').length,
+      blockedCatalogCount:combined.filter((s) => s.catalogRecord && s.recordAccess === 'blocked').length,
+      relatedRecordCount,
+      libraryOfCongressCount:combined.filter((s) => s.discoverySource === 'library-of-congress').length,
+      archiveProviders:archiveProviderStatuses,
+      archiveProviderCount:archiveProviderStatuses.length,
+      archiveProviderSearchedCount:archiveProviderStatuses.filter((row) => row.searched).length,
+      archiveProviderBlockedCount:archiveProviderStatuses.filter((row) => row.blocked).length
+    };
+  }
+}
+
+export {
+  planSignal, normalize, cleanedTitle, addressEvidence, propertyAliasesFromParcel, aliasEvidence,
+  extractCatalogPage, looksLikeCatalog, looksLikeAsset, classifyResult, dedupeSources
+};
