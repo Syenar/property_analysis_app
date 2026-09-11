@@ -36,6 +36,7 @@ jobs:
           legacy = "    } else {\\n      // Parcel ownership/geometry is frequently maintained by the county even\\n"
           preview = "    } else {\\n      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true, includeState:true })) {\\n"
           s=s.replace(legacy, preview, 2)
+          s=s.replace("for (const path of ['cloudflare/worker.mjs','src/server/node-server.mjs'])", "for (const path of ['cloudflare/worker.mjs'])", 1)
           for expr in [
               '${row.place}',
               '${blueprintSources.length}',
