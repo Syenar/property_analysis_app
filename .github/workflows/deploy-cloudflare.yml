@@ -29,7 +29,7 @@ jobs:
       - name: Apply blueprint and building-plan discovery update
         shell: bash
         run: |
-          cat _blueprint_patch/p00.b64 _blueprint_patch/p01.b64 _blueprint_patch/p02.b64 _blueprint_patch/p03.b64 _blueprint_patch/p04.b64 | base64 -d > /tmp/patch-preview-blueprints.mjs
+          cat _blueprint_patch/p00.b64 _blueprint_patch/p01.b64 _blueprint_patch/p02a.b64 _blueprint_patch/p02b.b64 _blueprint_patch/p02c.b64 _blueprint_patch/p03.b64 _blueprint_patch/p04.b64 | base64 -d > /tmp/patch-preview-blueprints.mjs
           echo '9f93d27a65d83c0257d19e4a00aa03146fe311f77f32cdf741a8399629f0f9e1  /tmp/patch-preview-blueprints.mjs' | sha256sum -c -
           node /tmp/patch-preview-blueprints.mjs
       - name: Verify updated preview source
