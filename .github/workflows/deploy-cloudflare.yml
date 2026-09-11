@@ -131,6 +131,9 @@ jobs:
           fi
           cat /tmp/health
           timeout 60s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
+          echo '--- research stream ---'
+          cat /tmp/research.ndjson
+          echo '--- end research stream ---'
           grep -q '"stage":"plans"' /tmp/research.ndjson
           grep -q '"type":"result"' /tmp/research.ndjson
           ! grep -q '"type":"error"' /tmp/research.ndjson
