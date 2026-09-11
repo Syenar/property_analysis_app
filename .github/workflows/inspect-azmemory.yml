@@ -1,0 +1,43 @@
+name: Inspect Arizona Memory Search
+on:
+  workflow_dispatch:
+  push:
+    branches: [temp-cloudflare-preview]
+    paths: [.github/workflows/inspect-azmemory.yml]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect search form and candidate parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://azmemory.azlibrary.gov/nodes/search'
+          curl -fsSL "$base" -o /tmp/search.html
+          echo '--- forms ---'
+          grep -Eoi '<form[^>]*>|<input[^>]*>|<select[^>]*>|<button[^>]*>' /tmp/search.html | head -120
+          echo '--- scripts mentioning search ---'
+          grep -Eoi '.{0,100}(search|keyword|query|term).{0,180}' /tmp/search.html | head -120 || true
+          echo '--- candidate GETs ---'
+          python3 - <<'PY'
+          import urllib.parse, urllib.request, re
+          base='https://azmemory.azlibrary.gov/nodes/search'
+          candidates=[
+            {'keywords':'Arizona State Capitol'}, {'keyword':'Arizona State Capitol'},
+            {'search':'Arizona State Capitol'}, {'query':'Arizona State Capitol'}, {'q':'Arizona State Capitol'},
+            {'searchterm':'Arizona State Capitol'}, {'searchterms':'Arizona State Capitol'},
+            {'search_text':'Arizona State Capitol'}, {'searchtext':'Arizona State Capitol'},
+          ]
+          for params in candidates:
+            url=base+'?'+urllib.parse.urlencode(params)
+            try:
+              with urllib.request.urlopen(url, timeout=20) as resp:
+                body=resp.read().decode('utf-8','replace')
+                status=resp.status
+                final=resp.geturl()
+            except Exception as e:
+              print(params, 'ERR', repr(e)); continue
+            text=re.sub(r'<[^>]+>',' ',body)
+            hits=sum(x.lower() in text.lower() for x in ['Arizona State Capitol','02-0299','02-0300','Architectural drawings'])
+            print(params, status, final, 'len',len(body),'hits',hits, 'resultword', 'results found' in text.lower())
+          PY
