@@ -71,6 +71,7 @@ jobs:
           fi
           rm -f blueprint-patch-error.log
           node scripts/patch-preview-blueprint-finalize.mjs
+          node scripts/patch-preview-address-normalization.mjs
           cat > src/core/abort.mjs <<'EOF'
           export function createAbortError(message = 'The operation was aborted') {
             const error = new Error(message);
@@ -106,6 +107,7 @@ jobs:
           grep -q 'blueprintResearch' web/app.js
           grep -q 'blueprintResearch' src/packets/research-packet.mjs
           grep -q 'permit-record-attachment' src/plans/blueprint-discovery.mjs
+          grep -q 'harvestedAddressQueries' src/plans/archive-catalog-discovery.mjs
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
