@@ -8,26 +8,32 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe Arizona State Research Library catalog
+      - name: Search Arizona harvested catalog in a real browser
         shell: bash
         run: |
           set -u
-          ua='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36'
           base='https://asli.na5.iiivega.com'
+          chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
+          echo "Chrome: $chrome"
+          if [ -z "$chrome" ]; then exit 2; fi
           for query in 'Arizona State Capitol' 'Architects plan for the Arizona State Capitol in Phoenix' '02-0299' '02-0300'; do
-            url="$base/search?query=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")&searchType=everything&pageSize=20"
-            code=$(curl -A "$ua" -L -sS -o /tmp/vega.html -w '%{http_code}' "$url" || true)
-            echo "=== $query === HTTP $code final-size=$(wc -c </tmp/vega.html 2>/dev/null || echo 0)"
-            grep -Eio '.{0,160}(Arizona State Capitol|02-0299|02-0300|architectural drawing|azmemory|236509|236514).{0,240}' /tmp/vega.html | head -80 || true
-            echo '--- URLs/API hints ---'
-            grep -Eo 'https?://[^"<> ]+|/[A-Za-z0-9_./?=&%-]*(api|search)[A-Za-z0-9_./?=&%-]*' /tmp/vega.html | grep -Ei 'api|search|graphql|record' | head -80 || true
+            encoded=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")
+            url="$base/search?query=$encoded&searchType=everything&pageSize=20"
+            echo "=== $query ==="
+            timeout 50s "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=18000 --dump-dom "$url" > /tmp/dom.html 2>/tmp/chrome.err || true
+            echo "DOM bytes=$(wc -c </tmp/dom.html 2>/dev/null || echo 0)"
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+          html=Path('/tmp/dom.html').read_text(errors='replace')
+          text=re.sub(r'<[^>]+>',' ',html)
+          text=re.sub(r'\s+',' ',text)
+          for term in ['Arizona State Capitol','02-0299','02-0300','architectural drawing','No results','results found']:
+              i=text.lower().find(term.lower())
+              if i>=0: print(term, '=>', text[max(0,i-250):i+500])
+          for m in re.finditer(r'href="([^"]+)"',html,re.I):
+              href=m.group(1)
+              if 'recordId=' in href or '/search/card' in href or 'azmemory' in href.lower(): print('HREF',href)
+          PY
+            echo '--- chrome errors ---'; tail -30 /tmp/chrome.err || true
           done
-          echo '--- JS bundle API strings from catalog home ---'
-          curl -A "$ua" -L -sS "$base/" -o /tmp/home.html || true
-          grep -Eo '<script[^>]+src="[^"]+' /tmp/home.html | sed -E 's/.*src="//' | head -20 > /tmp/scripts.txt || true
-          while read -r src; do
-            [ -z "$src" ] && continue
-            case "$src" in http*) u="$src";; /*) u="$base$src";; *) u="$base/$src";; esac
-            curl -A "$ua" -L -sS "$u" -o /tmp/bundle.js || continue
-            grep -Eio '.{0,100}(graphql|/api/|search[^" ]{0,100}|recordId).{0,180}' /tmp/bundle.js | head -60 || true
-          done < /tmp/scripts.txt
