@@ -68,6 +68,7 @@ jobs:
             exit "$patch_status"
           fi
           rm -f blueprint-patch-error.log
+          node scripts/patch-preview-blueprint-finalize.mjs
           cat > src/core/abort.mjs <<'EOF'
           export function createAbortError(message = 'The operation was aborted') {
             const error = new Error(message);
@@ -99,12 +100,10 @@ jobs:
           s=s.replace("address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, fetchOrdinanceDocuments:true", "address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, maxBlueprintDocuments:10, fetchOrdinanceDocuments:true, fetchBlueprintDocuments:true")
           p.write_text(s)
           PY
-          echo '--- generated blueprint discovery ---'
-          sed -n '1,320p' src/plans/blueprint-discovery.mjs
-          echo '--- generated engine plans block ---'
-          grep -n -A160 -B30 "Searching public permit" src/engine/property-research-engine.mjs || true
-          echo '--- end generated plan trace ---'
           grep -q "import { rethrowIfAborted } from '../core/abort.mjs';" src/engine/property-research-engine.mjs
+          grep -q 'blueprintResearch' web/app.js
+          grep -q 'blueprintResearch' src/packets/research-packet.mjs
+          grep -q 'permit-record-attachment' src/plans/blueprint-discovery.mjs
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
@@ -141,6 +140,9 @@ jobs:
           echo '--- end research stream ---'
           grep -q '"stage":"plans"' /tmp/research.ndjson
           grep -q '"type":"result"' /tmp/research.ndjson
+          grep -q '"blueprintResearch":{"attempted":true' /tmp/research.ndjson
+          grep -q '"blueprintSources":\[' /tmp/research.ndjson
+          grep -q '"blueprintDocuments":\[' /tmp/research.ndjson
           ! grep -q '"type":"error"' /tmp/research.ndjson
           ! grep -Fqi 'rethrowIfAborted is not defined' /tmp/research.ndjson
           ! grep -Fqi 'signal is not defined' /tmp/research.ndjson
@@ -148,4 +150,4 @@ jobs:
           ! grep -Fqi 'maxBlueprintDocuments is not defined' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
           ! grep -Fqi 'error code: 1042' /tmp/research.ndjson
-          echo 'Live blueprint research completed without stream errors.'
+          echo 'Live building-document research reached the final browser packet.'
