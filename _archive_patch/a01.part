@@ -1,0 +1,125 @@
+').match(/<meta\b[^>]*>/gi) || []) {
+    const key = (extractAttr(tag, 'property') || extractAttr(tag, 'name')).toLowerCase();
+    if (wanted.includes(key)) {
+      const content = extractAttr(tag, 'content');
+      if (content) return content;
+    }
+  }
+  return '';
+}
+
+function absoluteUrl(raw, base) {
+  try { return new URL(decodeEntities(raw), base).toString(); } catch { return null; }
+}
+
+function parseJsonLd(html) {
+  const values = [];
+  for (const m of String(html || '').matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { values.push(JSON.parse(decodeEntities(m[1]).trim())); } catch {}
+  }
+  return values;
+}
+
+function flattenJsonLd(value, out = []) {
+  if (Array.isArray(value)) { value.forEach((x) => flattenJsonLd(x, out)); return out; }
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, val] of Object.entries(value)) {
+    if (['name','headline','description','text','identifier','keywords','contentUrl','encodingFormat','dateCreated','datePublished','about'].includes(key) && typeof val === 'string') out.push(val);
+    else if (typeof val === 'object') flattenJsonLd(val, out);
+  }
+  return out;
+}
+
+function extractCatalogPage(html, pageUrl) {
+  const titleTag = String(html || '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '';
+  const title = cleanedTitle(extractMeta(html, ['og:title','twitter:title']) || stripHtml(titleTag));
+  const description = decodeEntities(extractMeta(html, ['description','og:description','twitter:description']));
+  const jsonLd = parseJsonLd(html);
+  const jsonText = flattenJsonLd(jsonLd).join(' ');
+  const text = stripHtml(String(html || '')).replace(/\s+/g, ' ').trim().slice(0, 70000);
+  const combined = `${title} ${description} ${jsonText} ${text}`;
+  const links = [];
+  for (const tag of String(html || '').match(/<(?:a|img|source)\b[^>]*>/gi) || []) {
+    const raw = extractAttr(tag, tag.toLowerCase().startsWith('<a') ? 'href' : 'src');
+    const url = raw ? absoluteUrl(raw, pageUrl) : null;
+    if (!url) continue;
+    const anchorText = tag.toLowerCase().startsWith('<a') ? '' : extractAttr(tag, 'alt');
+    links.push({ url, text:anchorText });
+  }
+  return { title, description, text, combined, links, jsonLd };
+}
+
+function looksLikeCatalog(url, text = '') {
+  let path = '';
+  try { path = new URL(url).pathname; } catch {}
+  return RECORD_ROUTE_RE.test(path) || CATALOG_SIGNALS.test(`${text} ${url}`);
+}
+
+function looksLikeAsset(url) {
+  let path = '';
+  try { path = new URL(url).pathname; } catch {}
+  return DIRECT_DOCUMENT_RE.test(url) || ASSET_ROUTE_RE.test(path);
+}
+
+function classifyResult(result, { jurisdiction, address, aliases, ids, policy, discoverySource = 'archive-web-search', catalogRecord = false, recordAccess = null } = {}) {
+  const text = `${result.title || ''} ${result.description || ''} ${result.text || ''} ${result.url || ''}`;
+  const signal = planSignal(text);
+  if (!signal) return null;
+  const addressMatch = addressEvidence(text, address);
+  const aliasMatch = aliasEvidence(text, aliases);
+  const parcelIdMatch = parcelIdEvidence(text, ids);
+  const queryScoped = result.discoveryScope === 'extra' || result.queryScoped === true;
+  if (!addressMatch.matched && !aliasMatch && !parcelIdMatch && !queryScoped) return null;
+  const official = officialHost(result.url);
+  const directDocument = looksLikeAsset(result.url);
+  const authority = sourceAuthorityScore({ ...result, description:`${result.description || ''} ${catalogRecord ? 'official archive catalog' : ''}` }, jurisdiction);
+  const propertyScore = addressMatch.matched ? 24 : parcelIdMatch ? 24 : aliasMatch ? Math.min(22, 12 + Math.round((aliasMatch.confidence || 50) / 10)) : queryScoped ? 7 : 0;
+  const archiveBonus = catalogRecord || looksLikeCatalog(result.url, text) ? 8 : 0;
+  const directBonus = directDocument ? 8 : 0;
+  const confidence = Math.min(100, Math.max(0, authority.score + signal.score + propertyScore + archiveBonus + directBonus));
+  let automation = policy.decision(result.url, { official, kind:'blueprint', title:result.title, description:result.description });
+  if (recordAccess === 'blocked') automation = { ...automation, action:'link-only', reason:result.blockReason || 'archive-record-automation-blocked' };
+  return {
+    ...result,
+    kind:'blueprint-candidate',
+    discoverySource,
+    planType:signal.type,
+    official,
+    directDocument,
+    catalogRecord:Boolean(catalogRecord || looksLikeCatalog(result.url, text)),
+    recordAccess:recordAccess || null,
+    confidence,
+    confidenceReasons:[
+      ...(authority.reasons || []), `plan-signal:${signal.type}`,
+      ...(addressMatch.matched ? ['address-evidence'] : []),
+      ...(aliasMatch ? [`property-alias:${aliasMatch.value || aliasMatch}`] : []),
+      ...(parcelIdMatch ? [`parcel-id:${parcelIdMatch.key}`] : []),
+      ...(queryScoped ? ['property-scoped-query'] : []),
+      ...((catalogRecord || looksLikeCatalog(result.url, text)) ? ['archive-catalog-record'] : []),
+      ...(directDocument ? ['direct-document-url'] : [])
+    ],
+    matchEvidence:{ addressMatch:addressMatch.matched, propertyAliasMatch:aliasMatch || null, parcelIdMatch:parcelIdMatch || null, queryScoped },
+    automation
+  };
+}
+
+function sourceRichness(row) {
+  let score = 0;
+  if (row?.recordAccess) score += 6;
+  if (row?.catalogRecord) score += 3;
+  if (row?.catalogParentUrl) score += 2;
+  if (row?.description) score += 1;
+  if (row?.matchEvidence?.propertyAliasMatch) score += 1;
+  return score;
+}
+
+function dedupeSources(rows) {
+  const map = new Map();
+  for (const row of rows.filter(Boolean)) {
+    const key = row.url;
+    const current = map.get(key);
+    if (!current) { map.set(key, row); continue; }
+    const richer = sourceRichness(row) >= sourceRichness(current) ? row : current;
+    const other = richer === row ? current : row;
+    const merged = { ...other, ...richer };
+    merged.confidence = Math.max(Number(current.confidence || 0), Number(row.c
