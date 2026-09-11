@@ -1,0 +1,8 @@
+file:///tmp/blueprints.mjs:26
+  `    } else if (purpose === 'blueprint') {\n      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true, includeState:false })) {\n        queryRows.push(\n          { ...row, q:\`${row.place} building permit plans architectural drawings site plan\` },\n          { ...row, q:\`${row.place} permit records plan review documents\` }\n        );\n      }\n    } else {\n      // Parcel ownership/geometry is frequently maintained by the county even\n`);
+                                                                                                                                                                                                                ^
+
+ReferenceError: row is not defined
+    at file:///tmp/blueprints.mjs:26:209
+
+Node.js v22.23.2
