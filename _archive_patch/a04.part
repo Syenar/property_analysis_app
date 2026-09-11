@@ -1,0 +1,11 @@
+ocked').length,
+      relatedRecordCount:combined.filter((s) => s.discoverySource === 'archive-related-record').length,
+      libraryOfCongressCount:combined.filter((s) => s.discoverySource === 'library-of-congress').length
+    };
+  }
+}
+
+export {
+  planSignal, normalize, cleanedTitle, addressEvidence, propertyAliasesFromParcel, aliasEvidence,
+  extractCatalogPage, looksLikeCatalog, looksLikeAsset, classifyResult, dedupeSources
+};
