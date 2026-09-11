@@ -1,0 +1,109 @@
+ecordAccess = 'blocked';
+    else if (accesses.includes('fetched')) merged.recordAccess = 'fetched';
+    else if (accesses.includes('link-only')) merged.recordAccess = 'link-only';
+    else if (accesses.includes('unavailable')) merged.recordAccess = 'unavailable';
+    if (merged.recordAccess === 'blocked') {
+      const blocked = [current,row].find((x) => x.recordAccess === 'blocked');
+      if (blocked?.automation) merged.automation = blocked.automation;
+      if (blocked?.blockReason) merged.blockReason = blocked.blockReason;
+    }
+    map.set(key, merged);
+  }
+  return [...map.values()].sort((a,b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+function locResultToSearchResult(row, query) {
+  const description = Array.isArray(row.description) ? row.description.join(' ') : (row.description || row.item?.notes?.join?.(' ') || '');
+  return {
+    title:row.title || row.item?.title || 'Library of Congress record',
+    url:row.id || row.url || row.item?.id,
+    description:`${description} ${(row.subject || []).join?.(' ') || ''} ${(row.location || []).join?.(' ') || ''}`,
+    source:'library-of-congress',
+    discoveryScope:'extra',
+    discoveryQuery:query,
+    queryScoped:true,
+    catalogRecord:true
+  };
+}
+
+export class ArchiveCatalogDiscovery {
+  constructor({ http, webSearch, policy, robots = null, archiveProviders = [], maxRecordInspections = 8, maxRelatedSearches = 3, maxSearchQueries = 10 } = {}) {
+    this.http = http;
+    this.webSearch = webSearch;
+    this.policy = policy;
+    this.robots = robots;
+    this.maxRecordInspections = maxRecordInspections;
+    this.maxRelatedSearches = maxRelatedSearches;
+    this.maxSearchQueries = maxSearchQueries;
+    this.archiveProviders = Array.isArray(archiveProviders) ? archiveProviders : [];
+  }
+
+  async searchIiiVega(provider, query, { signal, pageSize = null } = {}) {
+    const catalog = provider?.harvestedCatalog;
+    if (!catalog || catalog.type !== 'iii-vega' || !catalog.endpoint || !this.http) return [];
+    throwIfAborted(signal);
+    const customerDomain = catalog.customerDomain || new URL(catalog.catalogUrl).hostname;
+    const body = JSON.stringify({
+      searchText:String(query || '').trim(), sorting:'relevance', sortOrder:'asc', searchType:'everything',
+      pageNum:0, pageSize:Number(pageSize || catalog.pageSize || 30), resourceType:'FormatGroup'
+    });
+    if (!JSON.parse(body).searchText) return [];
+    const data = await this.http.getJson(catalog.endpoint, {
+      method:'POST', body, signal,
+      headers:{
+        'Content-Type':'application/json', 'Accept':'application/json, text/plain, */*', 'api-version':'2',
+        'iii-customer-domain':customerDomain, 'iii-host-domain':customerDomain,
+        'Anonymous-User-Id':freshAnonymousId(), 'Origin':catalog.catalogUrl, 'Referer':catalog.catalogUrl
+      }
+    });
+    return Array.isArray(data?.data) ? data.data : [];
+  }
+
+  async searchContentDm(provider, query, { signal, pageSize = null } = {}) {
+    const catalog = provider?.harvestedCatalog;
+    if (!catalog || catalog.type !== 'contentdm' || !catalog.apiBase || !this.http) return [];
+    const base = String(catalog.apiBase).replace(/\/$/, '');
+    const collections = Array.isArray(catalog.collections) ? catalog.collections : [];
+    const maxRecords = Math.max(1, Math.min(100, Number(pageSize || catalog.pageSize || 30)));
+    const results = [];
+    for (const collection of collections.slice(0, 12)) {
+      throwIfAborted(signal);
+      const url = `${base}/digital/api/search/collection/${encodeURIComponent(collection)}/searchterm/${encodeURIComponent(String(query || '').trim())}/field/all/maxRecords/${maxRecords}`;
+      const data = await this.http.getJson(url, { signal, headers:{ Accept:'application/json' } });
+      for (const row of data?.items || data?.results || []) results.push(contentDmRowToResult(row, provider, query, collection));
+    }
+    return results;
+  }
+
+  async searchOmekaS(provider, query, { signal, pageSize = null } = {}) {
+    const catalog = provider?.harvestedCatalog;
+    if (!catalog || catalog.type !== 'omeka-s' || !catalog.apiBase || !this.http) return [];
+    const apiBase = String(catalog.apiBase).replace(/\/$/, '');
+    const url = new URL(`${apiBase}/items`);
+    url.searchParams.set('fulltext_search', String(query || '').trim());
+    url.searchParams.set('per_page', String(Math.max(1, Math.min(100, Number(pageSize || catalog.pageSize || 30)))));
+    if (catalog.itemSetId != null) url.searchParams.set('item_set_id', String(catalog.itemSetId));
+    const data = await this.http.getJson(url.toString(), { signal, headers:{ Accept:'application/json' } });
+    return (Array.isArray(data) ? data : data?.items || []).map((row) => omekaRowToResult(row, provider, query));
+  }
+
+  async searchHarvestedCatalog(provider, query, options = {}) {
+    const type = provider?.harvestedCatalog?.type;
+    if (type === 'iii-vega') return (await this.searchIiiVega(provider, query, options)).map((row) => vegaRowToResult(row, provider, query));
+    if (type === 'contentdm') return this.searchContentDm(provider, query, options);
+    if (type === 'omeka-s') return this.searchOmekaS(provider, query, options);
+    return [];
+  }
+
+  async expandHarvestedAssets(provider, result, classified, { signal } = {}) {
+    if (provider?.harvestedCatalog?.type !== 'omeka-s' || !Array.isArray(result?.mediaApiUrls) || !result.mediaApiUrls.length) return [];
+    const assets=[];
+    for (const mediaApiUrl of result.mediaApiUrls.slice(0, 8)) {
+      throwIfAborted(signal);
+      let media;
+      try { media = await this.http.getJson(mediaApiUrl, { signal, headers:{ Accept:'application/json' } }); }
+      catch (error) { rethrowIfAborted(error, signal); continue; }
+      const url=media?.['o:original_url'] || media?.original_url || null;
+      if (!url) continue;
+      const title=decodeEntities(media?.['o:title'] || classified?.title || 'Archive plan asset');
+      const mediaType=String(media?.['o:media_type'] || media?.media_type |
