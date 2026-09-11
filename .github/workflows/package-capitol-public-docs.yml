@@ -1,0 +1,54 @@
+name: Package Arizona Capitol Public Documents
+on:
+  push:
+    branches: [temp-cloudflare-preview]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull unrestricted documents and verified plan references
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle
+          curl -fL --retry 3 -o bundle/National_Register_nomination.pdf 'https://npgallery.nps.gov/NRHP/GetAsset/9afe1b5e-0fe2-4207-81e1-5614a3649b86'
+          curl -fL --retry 3 -o bundle/HABS_data.pdf 'https://cdn.loc.gov/master/pnp/habshaer/az/az0200/az0207/data/az0207data.pdf'
+          curl -fL --retry 3 -o bundle/HABS_captions.pdf 'https://cdn.loc.gov/master/pnp/habshaer/az/az0200/az0207/data/az0207cap.pdf'
+          printf '%s\n' \
+            '1700 W WASHINGTON ST, PHOENIX, AZ 85007' \
+            'Arizona State Capitol Complex' \
+            '' \
+            'VERIFIED ARCHIVAL ARCHITECTURAL PLAN RECORDS' \
+            'Arizona State Library / Arizona Memory Project' \
+            '' \
+            '1) Identifier: 02-0299.jpg' \
+            '   Date: 1900' \
+            '   Original format: Architectural drawings (visual works)' \
+            '   Record: https://azmemory.azlibrary.gov/nodes/view/236509' \
+            '' \
+            '2) Identifier: 02-0300.jpg' \
+            '   Date: 1900' \
+            '   Original format: Architectural drawings (visual works)' \
+            '   Record: https://azmemory.azlibrary.gov/nodes/view/236514' \
+            '   Public display asset: https://azmemory.azlibrary.gov/assets/display/1508154-max?u=92268db151e7e51e3d653b197bf7fe49' \
+            '' \
+            'The Arizona Memory Project filtered catalog shows three Capitol architectural-plan records total.' \
+            'The archive returned HTTP 403 to automated file retrieval, so this package does not falsely include blocked image bytes.' \
+            'Open the official record pages above in a normal browser to view/download the archival scans under the archive terms.' \
+            '' \
+            'SUPPORTING EXACT-ADDRESS DOCUMENTATION INCLUDED' \
+            '- National Register nomination, NRIS 74000455' \
+            '- Historic American Buildings Survey AZ-112 data pages' \
+            '- Historic American Buildings Survey AZ-112 caption pages' \
+            > bundle/ARCHIVAL_PLAN_LINKS.txt
+          file bundle/*
+          sha256sum bundle/* > bundle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 1700-W-Washington-Phoenix-public-plan-research
+          path: bundle/
+          if-no-files-found: error
+          retention-days: 7
