@@ -1,0 +1,125 @@
+nst tab of row?.materialTabs || []) {
+    for (const id of tab?.availability?.recordIds || []) if (id) ids.push(String(id));
+    for (const edition of tab?.availability?.editions || []) if (edition?.recordId) ids.push(String(edition.recordId));
+  }
+  return [...new Set(ids)];
+}
+
+function catalogIdentityAlias(title, jurisdiction = {}) {
+  let value = cleanedTitle(title);
+  if (!value || value.length < 5 || value.length > 150) return null;
+  const placeNames = [jurisdiction?.municipality, jurisdiction?.mailingCity]
+    .map((x) => String(x || '').replace(/\s+(?:city|town|village|borough)$/i, '').trim()).filter(Boolean);
+  const state = String(jurisdiction?.state || '').trim();
+  for (const place of placeNames) {
+    if (state) value = value.replace(new RegExp(`\\s+in\\s+${escapeRegex(place)},?\\s+${escapeRegex(state)}\\s*$`, 'i'), '').trim();
+    value = value.replace(new RegExp(`\\s+in\\s+${escapeRegex(place)}\\s*$`, 'i'), '').trim();
+  }
+  value = value.replace(/\s+(?:building|complex|property|site)\s*$/i, '').trim();
+  if (/^(?:street scene|newsletter|search|home|welcome)$/i.test(value)) return null;
+  return value.length >= 5 ? value : null;
+}
+
+function escapeRegex(value = '') { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function vegaRowToResult(row, provider, query, { queryScoped = false } = {}) {
+  const urls = materialTabUrls(row);
+  const url = urls[0] || provider.harvestedCatalog?.catalogUrl || provider.catalogUrl;
+  const description = materialTabDescription(row);
+  const recordIds = materialTabRecordIds(row);
+  return {
+    title:decodeEntities(row?.title || 'Archive catalog record'),
+    description,
+    url,
+    source:provider.harvestedCatalog?.name || provider.name,
+    discoveryScope:queryScoped ? 'extra' : 'provider-catalog',
+    discoveryQuery:query,
+    queryScoped,
+    catalogRecord:Boolean(url && url !== provider.harvestedCatalog?.catalogUrl),
+    publicationDate:row?.publicationDate || null,
+    archiveRecordIds:recordIds,
+    previewImageUrl:row?.coverUrl?.large || row?.coverUrl?.medium || row?.coverUrl?.small || null,
+    providerId:provider.id,
+    harvestedCatalogId:row?.id || null
+  };
+}
+
+function contentDmRowToResult(row, provider, query, collection) {
+  const catalog = provider.harvestedCatalog || {};
+  const base = String(catalog.catalogUrl || provider.catalogUrl || catalog.apiBase || '').replace(/\/$/, '');
+  const itemPath = row?.itemLink || row?.itemlink || row?.item || '';
+  const url = itemPath ? absoluteUrl(itemPath, base + '/') : (row?.pointer != null && collection ? `${base}/digital/collection/${encodeURIComponent(collection)}/id/${encodeURIComponent(row.pointer)}` : base);
+  const description = decodeEntities(row?.descri || row?.description || row?.subjec || row?.find || '');
+  const title = decodeEntities(row?.title || row?.titlea || row?.name || 'Archive catalog record');
+  return {
+    title, description, url,
+    source:catalog.name || provider.name,
+    discoveryScope:'provider-catalog', discoveryQuery:query, queryScoped:false,
+    catalogRecord:Boolean(url && url !== base), publicationDate:row?.date || row?.dates || null,
+    archiveRecordIds:row?.pointer != null ? [`contentdm:${collection}:${row.pointer}`] : [],
+    previewImageUrl:row?.thumbnail ? absoluteUrl(row.thumbnail, base + '/') : null,
+    providerId:provider.id, harvestedCatalogId:row?.pointer != null ? String(row.pointer) : null,
+    collection
+  };
+}
+
+function omekaValue(row, key) {
+  const values = row?.[key];
+  if (!Array.isArray(values)) return '';
+  return values.map((v) => v?.['@value'] || v?.display_title || v?.value || '').filter(Boolean).join(' ');
+}
+
+function omekaRowToResult(row, provider, query) {
+  const catalog = provider.harvestedCatalog || {};
+  const title = decodeEntities(row?.['o:title'] || omekaValue(row, 'dcterms:title') || 'Archive catalog record');
+  const description = decodeEntities([omekaValue(row, 'dcterms:description'), omekaValue(row, 'dcterms:subject'), omekaValue(row, 'dcterms:spatial')].filter(Boolean).join(' '));
+  const id = row?.['o:id'];
+  const siteBase = String(catalog.catalogUrl || provider.catalogUrl || '').replace(/\/$/, '');
+  const url = row?.['@id'] || (id != null && siteBase ? `${siteBase}/item/${id}` : siteBase);
+  const thumbs = row?.thumbnail_display_urls || {};
+  return {
+    title, description, url, source:catalog.name || provider.name,
+    discoveryScope:'provider-catalog', discoveryQuery:query, queryScoped:false,
+    catalogRecord:Boolean(url), publicationDate:omekaValue(row, 'dcterms:date') || null,
+    archiveRecordIds:id != null ? [`omeka:${id}`] : [],
+    previewImageUrl:thumbs.large || thumbs.medium || thumbs.square || null,
+    mediaApiUrls:(row?.['o:media'] || []).map((m) => m?.['@id']).filter(Boolean),
+    providerId:provider.id, harvestedCatalogId:id != null ? String(id) : null
+  };
+}
+
+function aliasEvidence(text, aliases) {
+  const hay = normalize(text);
+  let best = null;
+  for (const alias of aliases || []) {
+    const target = normalize(alias.value || alias);
+    if (!target || target.length < 4) continue;
+    if (hay.includes(target) && (!best || target.length > normalize(best.value || best).length)) best = alias;
+  }
+  return best;
+}
+
+function parcelIdEvidence(text, ids) {
+  const hay = normalize(text);
+  for (const row of ids || []) {
+    const target = normalize(row.value);
+    if (target && hay.includes(target)) return row;
+  }
+  return null;
+}
+
+function extractAttr(tag, name) {
+  const re = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+  const m = String(tag || '').match(re);
+  return decodeEntities(m?.[1] ?? m?.[2] ?? m?.[3] ?? '');
+}
+
+function extractMeta(html, wanted) {
+  for (const tag of String(html || '').match(/<meta\b[^>]*>/gi) || []) {
+    const key = (extractAttr(tag, 'property') || extractAttr(tag, 'name')).toLowerCase();
+    if (wanted.includes(key)) {
+      const content = extractAttr(tag, 'content');
+      if (content) return content;
+    }
+  }
+  retur
