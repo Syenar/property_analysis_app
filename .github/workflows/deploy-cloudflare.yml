@@ -8,6 +8,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,10 +112,14 @@ jobs:
         shell: bash
         run: |
           set +e
-          npx --yes wrangler@4.130.0 deploy --temporary --config cloudflare/wrangler.toml > /tmp/wrangler.out 2>&1
+          wrangler_args=(deploy --temporary --config cloudflare/wrangler.toml)
+          if [ -n "${BRAVE_SEARCH_API_KEY:-}" ]; then
+            wrangler_args+=(--var "BRAVE_SEARCH_API_KEY:$BRAVE_SEARCH_API_KEY")
+          fi
+          npx --yes wrangler@4.130.0 "${wrangler_args[@]}" > /tmp/wrangler.out 2>&1
           status=$?
           set -e
-          cat /tmp/wrangler.out | sed -E 's#https://dash\.cloudflare\.com/[^ ]+#[claim-url-redacted]#g'
+          sed -E -e 's#https://dash\.cloudflare\.com/[^ ]+#[claim-url-redacted]#g' -e '/BRAVE_SEARCH_API_KEY/s/.*/env.BRAVE_SEARCH_API_KEY ([redacted])/' /tmp/wrangler.out
           test "$status" -eq 0
           url=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler.out | tail -1)
           test -n "$url"
@@ -134,7 +140,7 @@ jobs:
             exit 1
           fi
           cat /tmp/health
-          timeout 60s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
+          timeout 90s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
           echo '--- research stream ---'
           cat /tmp/research.ndjson
           echo '--- end research stream ---'
@@ -150,4 +156,8 @@ jobs:
           ! grep -Fqi 'maxBlueprintDocuments is not defined' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
           ! grep -Fqi 'error code: 1042' /tmp/research.ndjson
+          if [ -n "${BRAVE_SEARCH_API_KEY:-}" ]; then
+            grep -q '"webSearchAvailable":true' /tmp/research.ndjson
+            echo 'Configured web search was available to building-document discovery.'
+          fi
           echo 'Live building-document research reached the final browser packet.'
