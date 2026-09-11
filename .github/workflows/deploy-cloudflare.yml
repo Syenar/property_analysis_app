@@ -99,6 +99,7 @@ jobs:
           s=s.replace("address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, fetchOrdinanceDocuments:true", "address:'200 E Colfax Ave, Denver, CO 80203', maxGisCandidates:20, maxOrdinanceDocuments:0, maxBlueprintDocuments:10, fetchOrdinanceDocuments:true, fetchBlueprintDocuments:true")
           p.write_text(s)
           PY
+          grep -q "import { rethrowIfAborted } from '../core/abort.mjs';" src/engine/property-research-engine.mjs
           npm test
           npm run check
       - name: Deploy and verify temporary Worker
@@ -129,8 +130,11 @@ jobs:
             exit 1
           fi
           cat /tmp/health
-          timeout 30s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
+          timeout 60s curl -fsS --no-buffer -H 'content-type: application/json' --data '{"address":"1600 Pennsylvania Avenue NW, Washington, DC 20500","fetchOrdinanceDocuments":false,"fetchBlueprintDocuments":true,"maxGisCandidates":1,"maxBlueprintDocuments":1}' "$url/api/research/stream" >/tmp/research.ndjson || true
           grep -q '"stage":"plans"' /tmp/research.ndjson
+          grep -q '"type":"result"' /tmp/research.ndjson
+          ! grep -q '"type":"error"' /tmp/research.ndjson
+          ! grep -Fqi 'rethrowIfAborted is not defined' /tmp/research.ndjson
           ! grep -Fqi 'Illegal invocation' /tmp/research.ndjson
           ! grep -Fqi 'error code: 1042' /tmp/research.ndjson
-          echo 'Live blueprint-stage smoke check passed.'
+          echo 'Live blueprint research completed without stream errors.'
