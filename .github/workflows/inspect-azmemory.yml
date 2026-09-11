@@ -8,32 +8,40 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Search Arizona harvested catalog in a real browser
+      - name: Capture public Arizona catalog network endpoints
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           base='https://asli.na5.iiivega.com'
-          chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
-          echo "Chrome: $chrome"
-          if [ -z "$chrome" ]; then exit 2; fi
-          for query in 'Arizona State Capitol' 'Architects plan for the Arizona State Capitol in Phoenix' '02-0299' '02-0300'; do
-            encoded=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")
-            url="$base/search?query=$encoded&searchType=everything&pageSize=20"
-            echo "=== $query ==="
-            timeout 50s "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=18000 --dump-dom "$url" > /tmp/dom.html 2>/tmp/chrome.err || true
-            echo "DOM bytes=$(wc -c </tmp/dom.html 2>/dev/null || echo 0)"
-            python3 - <<'PY'
-          import re
+          chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser)
+          query='Architects plan for the Arizona State Capitol in Phoenix'
+          encoded=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")
+          url="$base/search?query=$encoded&searchType=everything&pageSize=20"
+          rm -f /tmp/netlog.json /tmp/dom.html
+          timeout 45s "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=18000 --log-net-log=/tmp/netlog.json --net-log-capture-mode=IncludeSensitive --dump-dom "$url" > /tmp/dom.html 2>/tmp/chrome.err || true
+          grep -q "Architect's plan for the Arizona State Capitol in Phoenix" /tmp/dom.html
+          python3 - <<'PY'
+          import json,re
           from pathlib import Path
-          html=Path('/tmp/dom.html').read_text(errors='replace')
-          text=re.sub(r'<[^>]+>',' ',html)
-          text=re.sub(r'\s+',' ',text)
-          for term in ['Arizona State Capitol','02-0299','02-0300','architectural drawing','No results','results found']:
-              i=text.lower().find(term.lower())
-              if i>=0: print(term, '=>', text[max(0,i-250):i+500])
-          for m in re.finditer(r'href="([^"]+)"',html,re.I):
-              href=m.group(1)
-              if 'recordId=' in href or '/search/card' in href or 'azmemory' in href.lower(): print('HREF',href)
+          p=Path('/tmp/netlog.json')
+          data=json.loads(p.read_text(errors='replace'))
+          urls=[]
+          def walk(x):
+              if isinstance(x,dict):
+                  for k,v in x.items():
+                      if k.lower() in {'url','uri'} and isinstance(v,str) and v.startswith('http'):
+                          urls.append(v)
+                      walk(v)
+              elif isinstance(x,list):
+                  for v in x: walk(v)
+          walk(data)
+          seen=set()
+          for u in urls:
+              if u in seen: continue
+              seen.add(u)
+              if any(s in u.lower() for s in ['api','search','query','graphql','formatgroup','record','vega','polaris','discovery']):
+                  print(u)
+          print('UNIQUE_URLS',len(seen))
           PY
-            echo '--- chrome errors ---'; tail -30 /tmp/chrome.err || true
-          done
+          echo '--- likely JSON responses / request URLs from netlog strings ---'
+          grep -Eo 'https?[^" ]+' /tmp/netlog.json | sed 's/\\u0026/\&/g' | grep -Ei 'api|search|query|graphql|record|formatgroup|polaris|discovery' | sort -u | head -200 || true
