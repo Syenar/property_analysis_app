@@ -1,8 +1,11 @@
-file:///tmp/blueprints.mjs:26
-  `    } else if (purpose === 'blueprint') {\n      for (const row of jurisdictionSearchScopes(jurisdiction, { includeCounty:true, includeState:false })) {\n        queryRows.push(\n          { ...row, q:\`${row.place} building permit plans architectural drawings site plan\` },\n          { ...row, q:\`${row.place} permit records plan review documents\` }\n        );\n      }\n    } else {\n      // Parcel ownership/geometry is frequently maintained by the county even\n`);
-                                                                                                                                                                                                                ^
+file:///tmp/blueprints.mjs:4
+async function replaceRequired(path, oldText, newText) { await patch(path, (s)=>{ if(s.includes(newText)) return s; if(!s.includes(oldText)) throw new Error(`Patch anchor missing in ${path}`); return s.replace(oldText,newText); }); }
+                                                                                                                                                   ^
 
-ReferenceError: row is not defined
-    at file:///tmp/blueprints.mjs:26:209
+Error: Patch anchor missing in src/discovery/source-discovery.mjs
+    at file:///tmp/blueprints.mjs:4:148
+    at patch (file:///tmp/blueprints.mjs:3:95)
+    at async replaceRequired (file:///tmp/blueprints.mjs:4:58)
+    at async file:///tmp/blueprints.mjs:24:1
 
 Node.js v22.23.2
