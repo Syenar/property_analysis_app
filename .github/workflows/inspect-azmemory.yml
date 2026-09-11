@@ -8,41 +8,63 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Capture Arizona catalog API request contract
+      - name: Capture Arizona catalog POST body with Chrome DevTools
         shell: bash
         run: |
           set -euo pipefail
-          base='https://asli.na5.iiivega.com'
           chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser)
-          query='Architects plan for the Arizona State Capitol in Phoenix'
-          encoded=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$query")
-          url="$base/search?query=$encoded&searchType=everything&pageSize=20"
-          rm -f /tmp/netlog.json /tmp/dom.html
-          timeout 45s "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=18000 --log-net-log=/tmp/netlog.json --net-log-capture-mode=IncludeSensitive --dump-dom "$url" > /tmp/dom.html 2>/tmp/chrome.err || true
-          grep -q "Architect's plan for the Arizona State Capitol in Phoenix" /tmp/dom.html
-          echo '--- netlog events for search endpoint ---'
+          "$chrome" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 --remote-allow-origins='*' about:blank >/tmp/chrome.out 2>/tmp/chrome.err &
+          chromepid=$!
+          trap 'kill $chromepid 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9222/json >/tmp/targets.json && break || sleep .5; done
+          cat >/tmp/capture.mjs <<'NODE'
+          const sleep = ms => new Promise(r=>setTimeout(r,ms));
+          const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
+          const target = targets.find(t=>t.type==='page');
+          if (!target) throw new Error('No page target');
+          const ws = new WebSocket(target.webSocketDebuggerUrl);
+          let id=0; const pending=new Map(); let captured=null;
+          const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params}));});
+          ws.onmessage=e=>{
+            const msg=JSON.parse(e.data);
+            if(msg.id&&pending.has(msg.id)){const p=pending.get(msg.id);pending.delete(msg.id);msg.error?p.reject(new Error(JSON.stringify(msg.error))):p.resolve(msg.result);return;}
+            if(msg.method==='Network.requestWillBeSent' && msg.params?.request?.url?.includes('/api/search-result/search/format-groups')){
+              const r=msg.params.request;
+              captured={url:r.url,method:r.method,headers:r.headers,postData:r.postData,hasPostData:r.hasPostData,requestId:msg.params.requestId};
+              console.log('CAPTURED_REQUEST='+JSON.stringify(captured));
+            }
+          };
+          await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
+          await send('Network.enable',{maxPostDataSize:1048576});
+          await send('Page.enable');
+          const q=encodeURIComponent('Architects plan for the Arizona State Capitol in Phoenix');
+          await send('Page.navigate',{url:`https://asli.na5.iiivega.com/search?query=${q}&searchType=everything&pageSize=20`});
+          for(let i=0;i<120&&!captured;i++) await sleep(250);
+          if(!captured) throw new Error('Search POST was not captured');
+          if(!captured.postData && captured.requestId){
+            try { const body=await send('Network.getRequestPostData',{requestId:captured.requestId}); captured.postData=body.postData; } catch {}
+          }
+          console.log('FINAL_REQUEST='+JSON.stringify(captured,null,2));
+          await sleep(500);
+          ws.close();
+          NODE
+          node /tmp/capture.mjs | tee /tmp/capture.log
+          grep -q 'FINAL_REQUEST=' /tmp/capture.log
+          echo '--- replay without browser using a fresh anonymous id ---'
           python3 - <<'PY'
-          import json
-          from pathlib import Path
-          data=json.loads(Path('/tmp/netlog.json').read_text(errors='replace'))
-          needle='/api/search-result/search/format-groups'
-          for e in data.get('events',[]):
-              text=json.dumps(e,ensure_ascii=False)
-              if needle in text or ('UPLOAD' in text and 'Architect' in text):
-                  print(json.dumps(e,ensure_ascii=False,indent=2)[:12000])
-          PY
-          echo '--- search JS endpoint context ---'
-          curl -fsSL "$base/src_app_search_search_module_ts.f2046c7e74979d74.js" -o /tmp/search.js
-          python3 - <<'PY'
-          from pathlib import Path
-          s=Path('/tmp/search.js').read_text(errors='replace')
-          for needle in ['search/format-groups','format-groups','search-result/search']:
-              start=0
-              print('\nNEEDLE',needle)
-              while True:
-                  i=s.find(needle,start)
-                  if i<0: break
-                  print(s[max(0,i-2500):i+3500])
-                  start=i+len(needle)
-                  if start>i+len(needle)+1: break
+          import json,re,uuid,urllib.request
+          text=open('/tmp/capture.log').read()
+          m=re.search(r'FINAL_REQUEST=(\{.*\})',text,re.S)
+          if not m: raise SystemExit('missing final request')
+          req=json.loads(m.group(1))
+          body=req['postData'].encode()
+          headers={
+            'Content-Type':'application/json','Accept':'application/json, text/plain, */*',
+            'api-version':'2','iii-customer-domain':'asli.na5.iiivega.com','iii-host-domain':'asli.na5.iiivega.com',
+            'Anonymous-User-Id':str(uuid.uuid4()),'Origin':'https://asli.na5.iiivega.com','Referer':'https://asli.na5.iiivega.com/'
+          }
+          r=urllib.request.Request(req['url'],data=body,headers=headers,method='POST')
+          with urllib.request.urlopen(r,timeout=30) as resp:
+            raw=resp.read().decode('utf-8','replace'); print('HTTP',resp.status,'bytes',len(raw)); print(raw[:6000])
+          assert "Architect's plan for the Arizona State Capitol in Phoenix" in raw
           PY
