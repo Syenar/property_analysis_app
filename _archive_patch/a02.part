@@ -1,0 +1,111 @@
+onfidence || 0));
+    merged.confidenceReasons = [...new Set([...(current.confidenceReasons || []), ...(row.confidenceReasons || [])])];
+    const accesses = [current.recordAccess, row.recordAccess].filter(Boolean);
+    if (accesses.includes('blocked')) merged.recordAccess = 'blocked';
+    else if (accesses.includes('fetched')) merged.recordAccess = 'fetched';
+    else if (accesses.includes('link-only')) merged.recordAccess = 'link-only';
+    else if (accesses.includes('unavailable')) merged.recordAccess = 'unavailable';
+    if (merged.recordAccess === 'blocked') {
+      const blocked = [current,row].find((x) => x.recordAccess === 'blocked');
+      if (blocked?.automation) merged.automation = blocked.automation;
+      if (blocked?.blockReason) merged.blockReason = blocked.blockReason;
+    }
+    map.set(key, merged);
+  }
+  return [...map.values()].sort((a,b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+function locResultToSearchResult(row, query) {
+  const description = Array.isArray(row.description) ? row.description.join(' ') : (row.description || row.item?.notes?.join?.(' ') || '');
+  return {
+    title:row.title || row.item?.title || 'Library of Congress record',
+    url:row.id || row.url || row.item?.id,
+    description:`${description} ${(row.subject || []).join?.(' ') || ''} ${(row.location || []).join?.(' ') || ''}`,
+    source:'library-of-congress',
+    discoveryScope:'extra',
+    discoveryQuery:query,
+    queryScoped:true,
+    catalogRecord:true
+  };
+}
+
+export class ArchiveCatalogDiscovery {
+  constructor({ http, webSearch, policy, robots = null, maxRecordInspections = 8, maxRelatedSearches = 3, maxSearchQueries = 10 } = {}) {
+    this.http = http;
+    this.webSearch = webSearch;
+    this.policy = policy;
+    this.robots = robots;
+    this.maxRecordInspections = maxRecordInspections;
+    this.maxRelatedSearches = maxRelatedSearches;
+    this.maxSearchQueries = maxSearchQueries;
+  }
+
+  async discoverIdentityAliases(jurisdiction, { address, parcel, signal } = {}) {
+    const aliases = propertyAliasesFromParcel(parcel);
+    if (!this.webSearch?.available?.()) return aliases;
+    const place = [jurisdiction?.municipality, jurisdiction?.state].filter(Boolean).join(' ');
+    const queries = [`"${address}" ${place}`.trim(), `"${address}" official building`];
+    for (const query of queries) {
+      throwIfAborted(signal);
+      let results = [];
+      try { results = await this.webSearch.search(query, { count:8, signal }); }
+      catch (error) { rethrowIfAborted(error, signal); continue; }
+      for (const result of results) {
+        const evidence = addressEvidence(`${result.description || ''} ${result.url || ''}`, address);
+        if (!evidence.matched) continue;
+        const title = cleanedTitle(result.title);
+        if (!title || title.length < 5 || title.length > 120 || /^(home|welcome|search|property search|maps?)$/i.test(title)) continue;
+        aliases.push({ value:title, source:result.url, confidence:officialHost(result.url) ? 88 : 68 });
+      }
+    }
+    return dedupeAliases(aliases);
+  }
+
+  async searchLibraryOfCongress(jurisdiction, { address, aliases, ids, signal } = {}) {
+    if (!this.http) return [];
+    const terms = [address, ...(aliases || []).slice(0, 3).map((x) => x.value || x)].filter(Boolean);
+    const rows = [];
+    for (const term of terms.slice(0, 4)) {
+      throwIfAborted(signal);
+      const query = `"${term}" architectural drawings building plans`;
+      const url = new URL('https://www.loc.gov/search/');
+      url.searchParams.set('fo','json'); url.searchParams.set('c','20'); url.searchParams.set('q', query);
+      let data;
+      try { data = await this.http.getJson(url.toString(), { signal, headers:{ Accept:'application/json' } }); }
+      catch (error) { rethrowIfAborted(error, signal); continue; }
+      for (const raw of data.results || []) {
+        const result = locResultToSearchResult(raw, query);
+        const classified = classifyResult(result, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'library-of-congress', catalogRecord:true });
+        if (classified) rows.push(classified);
+      }
+    }
+    return dedupeSources(rows);
+  }
+
+  async inspectRecord(result, context) {
+    const { jurisdiction, address, aliases, ids, signal } = context;
+    throwIfAborted(signal);
+    const policy = this.policy.decision(result.url, { official:officialHost(result.url), kind:'blueprint', title:result.title, description:result.description });
+    if (policy.action !== 'fetch') {
+      return classifyResult({ ...result, catalogRecord:true }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'link-only' });
+    }
+    if (this.robots) {
+      try {
+        const robots = await this.robots.decision(result.url, { signal });
+        if (!robots.allowed) {
+          return classifyResult({ ...result, catalogRecord:true, blockReason:robots.reason }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'blocked' });
+        }
+      } catch (error) { rethrowIfAborted(error, signal); }
+    }
+    let html;
+    try {
+      const fetched = await this.http.getText(result.url, { signal, headers:{ Accept:'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2' } });
+      html = fetched.text;
+    } catch (error) {
+      rethrowIfAborted(error, signal);
+      if (error instanceof HttpError && [401,403,429].includes(error.status)) {
+        return classifyResult({ ...result, catalogRecord:true, blockReason:`http-${error.status}` }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'blocked' });
+      }
+      return classifyResult({ ...result, catalogRecord:true }, { jurisdiction, address, aliases, ids, policy:this.policy, discoverySource:'archive-catalog', catalogRecord:true, recordAccess:'unavailable' });
+    }
+ 
